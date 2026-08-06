@@ -8,6 +8,7 @@
 5. TH 站点至少 3 张 final 含泰文原文（逐字文案嵌入，不被翻译成英文，主图也允许营销文案）。
 6. 尺寸/容量等硬事实被采纳（至少一张引用 3.5L 或麦饭石，zh 或 final 均可）。
 7. 无「避免最高级」等自我词语限制（无词语限制原则）。
+8. final 必须以 Shopee 高 CTR 广告任务开头，且不得残留 target_language_copy 占位符。
 """
 import sys
 import re
@@ -83,6 +84,10 @@ assert not identity_hard_missing, f"以下槽位 final 缺少身份锁硬约束�
 for slot, text in finals.items():
     chinese = re.findall(r"[㐀-鿿]", text)
     assert len(chinese) <= 12, f"槽位 {slot} 疑似不是英文提示词：{text[:120]}"
+    assert text.startswith("Create a high-CTR Shopee Southeast Asia marketplace advertising poster"), (
+        f"槽位 {slot} final 未前置 Shopee 广告任务：{text[:120]}"
+    )
+    assert "target_language_copy" not in text, f"槽位 {slot} final 残留占位符"
 
 # 3. 无「避免」类自我词语限制
 restriction_hits = []

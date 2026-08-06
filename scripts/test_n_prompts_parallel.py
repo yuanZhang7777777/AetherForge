@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import backend.services.prepare as prepare_module
 from backend.services.prepare import _generate_n_prompts_parallel, _n_prompts
+from backend.services.prepare import _prompt_item
 
 
 class FakeDeepSeek:
@@ -35,6 +36,7 @@ class FakeDeepSeek:
 def main() -> None:
     test_parallel_slot_generation()
     test_parallel_failure_falls_back_to_single_call()
+    test_prompt_item_front_loads_shopee_ad_style_and_visible_copy()
     print("PASS: split-slot N2 prompt writer")
 
 
@@ -108,6 +110,24 @@ def test_parallel_failure_falls_back_to_single_call() -> None:
     assert style_brief == "旧路径统一风格"
     assert prompts[1]["zh"] == "旧路径中文策划"
     assert len(fake_client.calls) == 2
+
+
+def test_prompt_item_front_loads_shopee_ad_style_and_visible_copy() -> None:
+    parsed = _prompt_item({
+        "slot": 1,
+        "zh": "Shopee 主图：红黄撞色，大标题，促销角标。",
+        "target_language_copy": "HOT SALE\nส่งฟรี",
+        "final": (
+            "IDENTITY: The reference product has exactly one rice cooker. "
+            "TEXT RENDERING: Embed the Thai copy exactly as provided in the target_language_copy field."
+        ),
+    })
+    assert parsed is not None
+    _, prompt = parsed
+    assert prompt["final"].startswith("Create a high-CTR Shopee Southeast Asia marketplace advertising poster")
+    assert "target_language_copy field" not in prompt["final"]
+    assert "HOT SALE" in prompt["final"]
+    assert "ส่งฟรี" in prompt["final"]
 
 
 if __name__ == "__main__":

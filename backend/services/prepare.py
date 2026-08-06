@@ -33,6 +33,12 @@ from .template import global_fallback_template, template_slots
 STAGES = ["N1", "N2", "N3"]
 
 _FALLBACK_NAME = "名称待确认"
+_SHOPEE_AD_PREFIX = (
+    "Create a high-CTR Shopee Southeast Asia marketplace advertising poster, not a clean studio product photo: "
+    "bold oversized headline, dense but hierarchical info modules, promo badges, icons, glowing product outline, "
+    "speed lines, strong red/yellow/black or orange/blue contrast, product occupies 60-70% of the frame, "
+    "designed for mobile shoppers."
+)
 
 
 class PreparationFailed(RuntimeError):
@@ -371,11 +377,31 @@ def _prompt_item(item, expected_slot: int | None = None) -> tuple[int, dict] | N
     final = str(item.get("final") or item.get("prompt") or "").strip()
     if slot < 1 or not final:
         return None
+    target_copy = str(item.get("target_language_copy") or "").strip()
     return slot, {
-        "final": final,
+        "final": _front_load_shopee_prompt(final, target_copy),
         "zh": str(item.get("zh") or "").strip(),
-        "target_language_copy": str(item.get("target_language_copy") or "").strip(),
+        "target_language_copy": target_copy,
     }
+
+
+def _front_load_shopee_prompt(final: str, target_copy: str) -> str:
+    text = final.strip()
+    if target_copy:
+        text = text.replace(
+            "Embed the Thai copy exactly as provided in the target_language_copy field.",
+            f"Render exactly these visible text lines, each line once: {target_copy}.",
+        )
+        text = text.replace("target_language_copy field", "visible text block")
+        text = text.replace("target_language_copy", "visible text block")
+        if target_copy not in text:
+            text += (
+                "\nVISIBLE TEXT: Render exactly these lines, each line once, with bold high-contrast typography:\n"
+                + target_copy
+            )
+    if not text.startswith(_SHOPEE_AD_PREFIX):
+        text = _SHOPEE_AD_PREFIX + "\n" + text
+    return text
 
 
 # ---------------------------------------------------------------- N3 就绪
