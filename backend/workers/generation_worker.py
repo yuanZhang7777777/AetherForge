@@ -23,7 +23,8 @@ from ..storage import get_storage
 
 log = logging.getLogger("aetherforge.generation_worker")
 
-ACTIVE_STATUSES = {"queued", "preparing", "submitting", "submitted", "processing", "archiving"}
+ACTIVE_STATUSES = {"preparing", "submitting", "submitted", "processing", "archiving"}
+CLAIM_BATCH_SIZE = 8
 
 _NORMALIZED = {
     "pending": "processing",
@@ -277,8 +278,8 @@ def _claim_queued(db: Session, limit: int) -> list[str]:
     generations = (
         db.query(Generation)
         .filter_by(status="queued")
-        .order_by(Generation.created_at, Generation.id)
-        .limit(limit)
+        .order_by(Generation.created_at.desc(), Generation.id.desc())
+        .limit(min(limit, CLAIM_BATCH_SIZE))
         .all()
     )
     claimed = [str(g.id) for g in generations]
@@ -287,6 +288,20 @@ def _claim_queued(db: Session, limit: int) -> list[str]:
     if claimed:
         db.commit()
     return claimed
+
+
+def _recover_orphaned_submitting(db: Session) -> int:
+    generations = (
+        db.query(Generation)
+        .filter_by(status="submitting")
+        .filter(Generation.provider_task_id.is_(None))
+        .all()
+    )
+    for generation in generations:
+        generation.status = "queued"
+    if generations:
+        db.flush()
+    return len(generations)
 
 
 def _main_loop() -> None:
@@ -310,6 +325,11 @@ def run() -> None:
     from ..db import wait_for_tables
 
     wait_for_tables()
+    with SessionLocal() as db:
+        recovered = _recover_orphaned_submitting(db)
+        if recovered:
+            db.commit()
+            log.warning("recovered %s orphaned submitting generations", recovered)
     log.info("generation-worker started")
     _main_loop()
 
