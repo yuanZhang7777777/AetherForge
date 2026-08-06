@@ -478,6 +478,19 @@ test("shows an eight-slot result grid for the project", async () => {
   expect(await screen.findByRole("img", { name: "标准白底产品图结果图" })).toHaveAttribute("loading", "lazy");
 });
 
+test("opens a lightbox when a result image is double-clicked and closes on Escape", async () => {
+  renderApp("/projects/project-demo/results");
+
+  fireEvent.doubleClick(await screen.findByRole("img", { name: "标准白底产品图结果图" }));
+
+  const dialog = await screen.findByRole("dialog", { name: "标准白底产品图 放大查看" });
+  expect(dialog).toHaveClass("fixed", "z-[70]");
+  expect(screen.getByRole("img", { name: "标准白底产品图 放大图" })).toHaveAttribute("src", "/api/results/result-1/media/");
+
+  fireEvent.keyDown(document, { key: "Escape" });
+  expect(screen.queryByRole("dialog", { name: "标准白底产品图 放大查看" })).not.toBeInTheDocument();
+});
+
 test("selects the latest successful version by default for export", async () => {
   renderApp("/projects/project-demo/results");
 

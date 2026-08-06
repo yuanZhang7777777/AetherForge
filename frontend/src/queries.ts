@@ -56,7 +56,10 @@ export function useProjectSnapshot(projectId: string | undefined) {
     },
     enabled: Boolean(projectId && projectQuery.data),
     refetchInterval: (query) => progressPollInterval(
-      query.state.data ? projectHasActiveWork(query.state.data) : projectQuery.data ? projectHasActiveWork(projectQuery.data) : false,
+      // progress 缓存可能陈旧（页面挂载后一直空闲）；用户点击预备/正式生成的乐观更新
+      // 会写进 project 缓存，两者任一显示有在途工作就恢复轮询，否则生成期间永远不轮询。
+      (query.state.data ? projectHasActiveWork(query.state.data) : false)
+        || (projectQuery.data ? projectHasActiveWork(projectQuery.data) : false),
       hidden,
     ),
   });

@@ -65,6 +65,7 @@ export function ResultGrid({ project }: { project: Project }) {
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [annotations, setAnnotations] = useState<ReviewAnnotation[]>([]);
   const [revisionNotice, setRevisionNotice] = useState("");
+  const [lightbox, setLightbox] = useState<{ url: string; name: string } | null>(null);
   const canvas = useRef<HTMLButtonElement>(null);
   const image = useRef<HTMLImageElement>(null);
   const selectedOutput = completed.find((output) => output.id === selectedOutputId) ?? completed[0];
@@ -74,6 +75,13 @@ export function ResultGrid({ project }: { project: Project }) {
     setSelectedIds(new Set(completed.map((output) => output.id)));
     setSelectedOutputId((current) => completed.some((output) => output.id === current) ? current : completed[0]?.id ?? "");
   }, [project.id, completedKey]);
+
+  useEffect(() => {
+    if (!lightbox) return;
+    const close = (event: globalThis.KeyboardEvent) => { if (event.key === "Escape") setLightbox(null); };
+    document.addEventListener("keydown", close);
+    return () => document.removeEventListener("keydown", close);
+  }, [lightbox]);
 
   const invalidate = async () => {
     await queryClient.invalidateQueries({ queryKey: ["project", project.id] });
@@ -149,7 +157,7 @@ export function ResultGrid({ project }: { project: Project }) {
                       </div>
                       <span className={`status status-${output.status}`}>v{output.attempt}</span>
                     </div>
-                    <button className="mt-3 result-preview" onClick={() => setSelectedOutputId(output.id)}>
+                    <button className="mt-3 result-preview" onClick={() => setSelectedOutputId(output.id)} onDoubleClick={() => { if (output.imageUrl) setLightbox({ url: output.imageUrl, name: outputName }); }}>
                       {output.imageUrl ? <img src={output.imageUrl} alt={`${outputName}结果图`} loading="lazy" decoding="async" /> : <span>{output.failureReason ?? "等待结果"}</span>}
                     </button>
                     {output.status === "completed" && output.imageUrl && (
@@ -214,6 +222,12 @@ export function ResultGrid({ project }: { project: Project }) {
           </section>
         )}
       </aside>
+      {lightbox && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-900/85 p-6" role="dialog" aria-modal="true" aria-label={`${lightbox.name} 放大查看`} onClick={() => setLightbox(null)}>
+          <button className="absolute right-4 top-4 text-sm font-semibold text-white" onClick={() => setLightbox(null)}>关闭</button>
+          <img src={lightbox.url} alt={`${lightbox.name} 放大图`} className="max-h-[88vh] max-w-full rounded-xl object-contain shadow-2xl" onClick={(event) => event.stopPropagation()} />
+        </div>
+      )}
     </div>
   );
 }

@@ -109,7 +109,8 @@ def _generation_progress(outputs: list[dict]) -> dict:
     statuses = [o["status"] for o in outputs]
     return {
         "completed": sum(1 for s in statuses if s == "completed"),
-        "active": sum(1 for s in statuses if s not in {"completed", "failed", "queued"}),
+        # queued 也是「在途工作」：点正式生成后立刻显示「出图中」，而不是退回预备完成
+        "active": sum(1 for s in statuses if s not in {"completed", "failed"}),
         "failed": sum(1 for s in statuses if s == "failed"),
         "total": len(outputs),
     }
