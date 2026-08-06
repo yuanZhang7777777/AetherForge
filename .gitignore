@@ -1,0 +1,20 @@
+# 密钥与本地配置（真实 .env 只在服务器，本地不入库）
+.env
+.env.*
+!.env.example
+.claude/
+
+# 构建产物与依赖
+frontend/node_modules/
+frontend/dist/
+__pycache__/
+*.pyc
+.venv/
+
+# 本地开发数据
+*.db
+*.db.bak-*
+media/
+.pytest_cache/
+
+.DS_Store

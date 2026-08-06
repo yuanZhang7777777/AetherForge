@@ -1,0 +1,100 @@
+"""DB 级集成测试：persist_prompts_direct 在真实 9 槽模板上写英文 PromptVersion。
+
+确定性路径（不调模型）：建 throwaway Batch+Cluster → persist_prompts_direct 写入
+{slot: 英文 prompt} → 断言 9 条、lang=en、display_prompt 空、node_name=prompt_writer、
+槽位覆盖 1-9 → 清理。
+
+在服务器容器内运行：docker exec aetherforge-prompt-worker python -m scripts.test_persist_direct
+"""
+import sys
+import uuid
+
+sys.path.insert(0, r"/app")
+
+from backend.db import SessionLocal
+from backend.models import Batch, Cluster, User
+from backend.services.template import global_fallback_template, template_slots
+from backend.services.prompt_compile import persist_prompts_direct
+
+SLOT_NAMES = {1: "Standard white-background product hero", 9: "Quality and trust"}
+
+
+def main() -> None:
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter_by(role="admin").order_by(User.created_at).first()
+        assert user is not None, "无 admin 用户"
+
+        template = global_fallback_template(db)
+        assert template is not None, "无全局兜底模板"
+        slots = [s for s in template_slots(template) if s.name != "Seller original product photo"]
+        assert len(slots) == 9, f"模板槽数应为 9，实际 {len(slots)}：{[s.name for s in slots]}"
+
+        batch = Batch(
+            owner_id=user.id,
+            name=f"__integ_test_{uuid.uuid4().hex[:8]}",
+            platform="shopee",
+            site="TH",
+            market="TH",
+            output_template_id=template.id,
+            ai_recognition_enabled=False,
+        )
+        db.add(batch)
+        db.flush()
+
+        cluster = Cluster(
+            batch_id=batch.id,
+            name="集成测试电饭煲",
+            sku="IT-INTEG-001",
+            product_name="智能电饭煲",
+            product_facts="3.5L 大容量\n24 小时智能预约",
+            identity_lock="主商品 智能电饭煲，部件/数量/颜色/布局与参考图一致，禁止增减部件。",
+            relation_type="single_product",
+        )
+        db.add(cluster)
+        db.flush()
+
+        prompts = {
+            order: (
+                f"Create a polished 1:1 Shopee listing image for slot {order}. "
+                f"The reference product has exactly one main body, one liner and one lid; "
+                f'colors match the reference image. Show exact visible text: "พร้อมใช้" (slot {order}).'
+            )
+            for order in range(1, 10)
+        }
+        style_brief = "统一奶油白柔和影棚光，浅灰渐变背景，产品居中偏下微俯拍。"
+        created = persist_prompts_direct(db, cluster, prompts, style_brief, actor_id=user.id)
+        db.flush()
+
+        assert len(created) == 9, f"应写 9 条 PromptVersion，实际 {len(created)}"
+        langs = {pv.structured_output.get("lang") for pv in created}
+        assert langs == {"en"}, f"lang 应全为 en：{langs}"
+        by_order = {pv.output_slot.order: pv for pv in created}
+        assert set(by_order) == set(range(1, 10)), f"槽位应覆盖 1-9：{sorted(by_order)}"
+        for order, pv in sorted(by_order.items()):
+            assert pv.prompt_text.strip(), f"槽位 {order} prompt 为空"
+            assert pv.node_name == "prompt_writer", f"槽位 {order} node_name={pv.node_name}"
+            assert pv.structured_output.get("node_output", {}).get("display_prompt") == "", (
+                f"槽位 {order} display_prompt 应为空"
+            )
+            assert pv.output_slot.name == SLOT_NAMES.get(order, pv.output_slot.name)
+
+        print("PASS：9 条英文 PromptVersion")
+        print(f"  模板槽数：{len(slots)}")
+        print(f"  槽名：{', '.join(s.name for s in slots)}")
+        print(f"  槽位覆盖：{sorted(by_order)}；lang=en；display_prompt 空；node_name=prompt_writer")
+
+        db.delete(cluster)
+        db.flush()
+        db.delete(batch)
+        db.commit()
+        print("清理完成：throwaway batch/cluster 已删除")
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+if __name__ == "__main__":
+    main()

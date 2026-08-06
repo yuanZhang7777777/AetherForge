@@ -1,0 +1,77 @@
+services:
+  db:
+    image: postgres:16
+    container_name: aetherforge-db
+    command: ["postgres", "-c", "max_connections=400"]
+    environment:
+      POSTGRES_USER: aetherforge
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-aetherforge}
+      POSTGRES_DB: aetherforge
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aetherforge"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  web:
+    image: aetherforge:latest
+    build: .
+    container_name: aetherforge-web
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg2://aetherforge:${POSTGRES_PASSWORD:-aetherforge}@db:5432/aetherforge
+      AETHERFORGE_MEDIA_ROOT: /data/media
+      DB_POOL_SIZE: 10
+      DB_MAX_OVERFLOW: 20
+    ports:
+      - "${AETHERFORGE_PORT:-18084}:8000"
+    volumes:
+      - ./media:/data/media
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  prompt-worker:
+    image: aetherforge:latest
+    build: .
+    container_name: aetherforge-prompt-worker
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg2://aetherforge:${POSTGRES_PASSWORD:-aetherforge}@db:5432/aetherforge
+      AETHERFORGE_MEDIA_ROOT: /data/media
+      DB_POOL_SIZE: 100
+      DB_MAX_OVERFLOW: 40
+      MAX_CONCURRENT_PREPARES: 100
+    command: ["python", "-m", "backend.workers.prompt_worker"]
+    volumes:
+      - ./media:/data/media
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  generation-worker:
+    image: aetherforge:latest
+    build: .
+    container_name: aetherforge-generation-worker
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg2://aetherforge:${POSTGRES_PASSWORD:-aetherforge}@db:5432/aetherforge
+      AETHERFORGE_MEDIA_ROOT: /data/media
+      DB_POOL_SIZE: 100
+      DB_MAX_OVERFLOW: 40
+      MAX_ACTIVE_GENERATIONS: 100
+    command: ["python", "-m", "backend.workers.generation_worker"]
+    volumes:
+      - ./media:/data/media
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  pgdata:

@@ -1,0 +1,61 @@
+@import "tailwindcss";
+
+@layer base {
+  body { @apply m-0 min-w-80 bg-blue-50/50 font-sans antialiased; }
+  input, select, textarea { @apply w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-100; }
+  textarea { @apply min-h-24 resize-y pb-5 leading-6; scrollbar-gutter: stable; }
+  table { @apply w-full min-w-175 border-collapse text-left text-sm; }
+  th { @apply border-b border-slate-200 bg-slate-50 px-5 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500; }
+  td { @apply border-b border-slate-100 px-5 py-4 align-middle text-slate-600; }
+  * { scrollbar-color: rgb(148 163 184 / 0.65) transparent; scrollbar-width: thin; }
+  *::-webkit-scrollbar { width: 10px; height: 10px; }
+  *::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
+  *::-webkit-scrollbar-track { background: transparent; }
+  *::-webkit-scrollbar-thumb { border: 3px solid transparent; border-radius: 999px; background: rgb(148 163 184 / 0.65); background-clip: content-box; }
+  *::-webkit-scrollbar-thumb:hover { background: rgb(100 116 139 / 0.85); background-clip: content-box; }
+  *::-webkit-scrollbar-corner { background: transparent; }
+  *::-webkit-resizer { background: transparent; }
+}
+
+@layer components {
+  .surface { @apply rounded-2xl border border-slate-200 bg-white shadow-sm shadow-slate-200/60; }
+  .primary-button { @apply inline-flex min-h-10 items-center justify-center rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white shadow-sm shadow-blue-200 transition hover:-translate-y-0.5 hover:bg-blue-700 hover:shadow-lg hover:shadow-blue-200 disabled:translate-y-0 disabled:cursor-not-allowed disabled:opacity-60 disabled:shadow-none; }
+  .secondary-button { @apply inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:-translate-y-0.5 hover:border-blue-200 hover:bg-blue-50 hover:shadow-sm disabled:translate-y-0; }
+  .nav-link { @apply block rounded-xl px-3 py-2.5 text-sm font-medium text-slate-600 transition hover:bg-slate-100 hover:text-slate-950; }
+  .nav-link-active { @apply bg-blue-50 text-blue-700; }
+  .status { @apply inline-flex whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-semibold; }
+  .status-draft, .status-queued { @apply bg-slate-100 text-slate-600; }
+  .status-running { @apply bg-blue-50 text-blue-700; }
+  .status-completed { @apply bg-emerald-50 text-emerald-700; }
+  .status-failed { @apply bg-rose-50 text-rose-700; }
+  .section-label { @apply text-xs font-semibold uppercase tracking-[0.14em] text-slate-500; }
+  .slot-button { @apply flex shrink-0 flex-col rounded-xl border border-slate-200 px-3 py-2 text-left text-sm font-medium text-slate-700; }
+  .slot-button span { @apply mt-1 text-xs text-slate-400; }
+  .slot-button-active { @apply border-blue-500 bg-blue-50 text-blue-700; }
+  .review-item { @apply block w-full rounded-xl px-3 py-3 text-left text-sm text-slate-700 hover:bg-slate-50; }
+  .review-item span, .review-item small { @apply block; }
+  .review-item small { @apply mt-1 text-xs text-slate-400; }
+  .review-item-active { @apply bg-blue-50 text-blue-700; }
+  .review-canvas { @apply relative grid min-h-96 w-full place-items-center overflow-hidden rounded-2xl bg-slate-100; }
+  .review-canvas img { @apply h-full max-h-130 w-full object-contain; }
+  .review-mark { @apply absolute grid size-7 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full border-2 border-white bg-rose-600 text-xs not-italic font-bold text-white shadow-lg; }
+  .result-card { @apply rounded-lg border border-slate-200 bg-white p-3 transition hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-lg hover:shadow-blue-100/70; }
+  .result-preview { @apply grid aspect-square w-full place-items-center overflow-hidden rounded-lg bg-slate-100 text-sm text-slate-400; }
+  .result-preview img { @apply h-full w-full object-contain; }
+  .product-card-grid { @apply grid gap-4 pb-28 [grid-template-columns:repeat(auto-fill,minmax(250px,1fr))]; }
+  .product-card { @apply min-w-0; content-visibility: auto; contain-intrinsic-size: 320px; }
+  .product-card-expanded-detail { @apply max-h-[calc(100vh-2rem)]; }
+  .toolbar-choice { @apply inline-flex min-h-8 items-center rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-600 hover:border-blue-200 hover:bg-blue-50; }
+  .toolbar-choice-active { @apply border-blue-500 bg-blue-50 text-blue-700; }
+  .progress-track { @apply h-2 overflow-hidden rounded-full bg-slate-100; }
+  .progress-fill { @apply block h-full rounded-full bg-blue-600 transition-all; }
+  .progress-fill-active { background-image: linear-gradient(90deg, rgba(255,255,255,0.15), rgba(255,255,255,0.45), rgba(255,255,255,0.15)); background-size: 180% 100%; animation: prompt-progress-pulse 1.2s ease-in-out infinite, prompt-progress-shimmer 1.1s linear infinite; }
+  @keyframes prompt-progress-pulse {
+    0%, 100% { opacity: 0.65; }
+    50% { opacity: 1; }
+  }
+  @keyframes prompt-progress-shimmer {
+    from { background-position: 180% 0; }
+    to { background-position: -180% 0; }
+  }
+}
