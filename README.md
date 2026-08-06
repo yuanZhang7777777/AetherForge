@@ -7,7 +7,7 @@
 1. ERP 或本地账号登录，前端通过 `/api/csrf/` 获取 CSRF token。
 2. 创建项目，选择平台、国家、图片比例、分辨率和项目风格提示词。
 3. 导入图片/文件夹或 ERP SKU；SKU 导入会用当前登录会话里的 ERP token 拉商品名和图片。
-4. 预备生成：N1 可选视觉识别，N2 先生成 `style_brief`，再按槽位并行生成 9 张图的中文策划和英文出图 prompt，N3 写入 READY 快照。
+4. 预备生成：N1 可选视觉识别，N2 先生成 Shopee 东南亚高 CTR 广告风格 `style_brief`，再按槽位并行生成 9 张图的中文策划和英文出图 prompt，N3 写入 READY 快照。
 5. 正式生成：generation-worker 用 gpt-image-2 生图，用户改过中文策划的槽位会在提交前轻量重译英文 prompt。
 6. 结果页查看、双击放大、选择图片导出 ZIP；导出只包含当前项目 owner 的 completed 结果。
 

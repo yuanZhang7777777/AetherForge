@@ -9,8 +9,8 @@ GLOBAL_TEMPLATE_KEY = "global-marketplace-baseline-template"
 # 9 张电商详情页固定槽位（与写提示词节点的 9 张结构对齐）。purpose 只写通用设计意图，
 # 不含任何具体商品的例子（用户明确：括号里的示例只是参考、可能是干扰项，不进系统提示词）。
 GLOBAL_SLOTS = (
-    (1, "Standard white-background product hero",
-     "Complete, accurate product on a pure white background with no promotional text or watermark"),
+    (1, "Shopee high-CTR main poster",
+     "Complete, accurate product hero poster with bold title, short selling points, promo badges, modules, glow, border and marketplace ad styling"),
     (2, "Key benefit", "Show one verified product selling point with a memorable visual"),
     (3, "Detail close-up", "Zoom into key details with callout lines and captions"),
     (4, "Real-life use", "Show the product being used naturally by a real person"),

@@ -15,15 +15,19 @@ sys.path.insert(0, str(ROOT if (ROOT / "backend").is_dir() else Path("/app")))
 
 from backend.db import SessionLocal
 from backend.models import Batch, Cluster, User
+from backend.seed import seed_output_template
 from backend.services.template import global_fallback_template, template_slots
 from backend.services.prompt_compile import persist_prompts_direct
 
-SLOT_NAMES = {1: "Standard white-background product hero", 9: "Quality and trust"}
+SLOT_NAMES = {1: "Shopee high-CTR main poster", 9: "Quality and trust"}
 
 
 def main() -> None:
     db = SessionLocal()
     try:
+        seed_output_template(db)
+        db.flush()
+
         user = db.query(User).filter_by(role="admin").order_by(User.created_at).first()
         assert user is not None, "无 admin 用户"
 

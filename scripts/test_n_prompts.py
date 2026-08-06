@@ -5,7 +5,7 @@
 2. 每张 slot 的 zh 与 final 都非空（双语双输出）。
 3. 每张 final 都是完整英文，且包含身份锁硬约束（The reference product has exactly ...）。
 4. style_brief 非空（整套统一风格）。
-5. TH 站点至少 2 张 final 含泰文原文（逐字文案嵌入，不被翻译成英文）。
+5. TH 站点至少 3 张 final 含泰文原文（逐字文案嵌入，不被翻译成英文，主图也允许营销文案）。
 6. 尺寸/容量等硬事实被采纳（至少一张引用 3.5L 或麦饭石，zh 或 final 均可）。
 7. 无「避免最高级」等自我词语限制（无词语限制原则）。
 """
@@ -32,7 +32,7 @@ FACTS = [
     "一键开盖防烫设计",
 ]
 SLOTS = [
-    {"order": 1, "name": "Standard white-background product hero"},
+    {"order": 1, "name": "Shopee high-CTR main poster"},
     {"order": 2, "name": "Key benefit"},
     {"order": 3, "name": "Detail close-up"},
     {"order": 4, "name": "Real-life use"},
@@ -91,10 +91,9 @@ for slot, text in finals.items():
         restriction_hits.append(slot)
 assert not restriction_hits, f"以下槽位存在词语限制：{restriction_hits}"
 
-# 4. TH 站点：至少 2 张 final 含泰文原文；主图（白底，无文字）不得含文案
+# 4. TH 站点：至少 3 张 final 含泰文原文；Shopee 主图允许营销文案
 thai_hits = [slot for slot, text in finals.items() if re.search(r"[฀-๿]", text)]
-assert len(thai_hits) >= 2, f"TH 站点泰文文案嵌入不足，仅 {thai_hits} 张含泰文"
-assert 1 not in thai_hits, "主图（白底 hero）不应含任何文案文字"
+assert len(thai_hits) >= 3, f"TH 站点泰文文案嵌入不足，仅 {thai_hits} 张含泰文"
 
 # 5. 尺寸/容量等硬事实被采纳：zh 或 final 任一引用 3.5L 或麦饭石
 spec_references = [

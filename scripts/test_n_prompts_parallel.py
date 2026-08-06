@@ -40,7 +40,7 @@ def main() -> None:
 
 def test_parallel_slot_generation() -> None:
     slots = [
-        {"order": 1, "name": "Standard white-background product hero"},
+        {"order": 1, "name": "Shopee high-CTR main poster"},
         {"order": 2, "name": "Key benefit"},
         {"order": 3, "name": "Detail close-up"},
     ]
@@ -92,7 +92,7 @@ def test_parallel_failure_falls_back_to_single_call() -> None:
     original_client = prepare_module.DeepSeekClient
     prepare_module.DeepSeekClient = lambda: fake_client
     try:
-        slot = SimpleNamespace(order=1, name="Standard white-background product hero", id="slot-1")
+        slot = SimpleNamespace(order=1, name="Shopee high-CTR main poster", id="slot-1")
         cluster = SimpleNamespace(
             name="智能电饭煲",
             product_name="智能电饭煲",
