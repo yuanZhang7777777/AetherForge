@@ -59,6 +59,14 @@ class Settings:
         )
     )
     catalog_timeout_seconds: int = field(default_factory=lambda: _int(os.getenv("CATALOG_TIMEOUT_SECONDS"), 15))
+    catalog_query_url: str = field(default_factory=lambda: os.getenv("CATALOG_QUERY_URL", ""))
+    catalog_allowed_image_hosts: tuple[str, ...] = field(
+        default_factory=lambda: tuple(
+            h.strip() for h in os.getenv("CATALOG_ALLOWED_IMAGE_HOSTS", "").split(",") if h.strip()
+        )
+    )
+    catalog_max_skus_per_request: int = field(default_factory=lambda: _int(os.getenv("CATALOG_MAX_SKUS_PER_REQUEST"), 50))
+    catalog_max_image_bytes: int = field(default_factory=lambda: _int(os.getenv("CATALOG_MAX_IMAGE_BYTES"), 20 * 1024 * 1024))
 
     # runtime
     offline_mode: bool = field(default_factory=lambda: _bool(os.getenv("OFFLINE_MODE"), False))

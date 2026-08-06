@@ -5,9 +5,9 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Resp
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
-from ..auth import require_user
+from ..auth import require_user, session_from
 from ..db import get_db
-from ..models import Batch, Cluster, SkuImportItem, User
+from ..models import Batch, Cluster, User
 from ..schemas import (
     ExportRequest,
     GenerateRequest,
@@ -18,6 +18,7 @@ from ..schemas import (
     SkuImportRequest,
 )
 from ..services.assets import UploadError, register_uploaded_asset, request_cluster_preparation
+from ..services.catalog import import_skus as import_catalog_skus
 from ..services.batches import (
     create_project,
     export_selected_generations,
@@ -143,50 +144,14 @@ async def upload_assets(
 def sku_import(project_id: str, payload: SkuImportRequest, request: Request, db: Session = Depends(get_db)):
     user = require_user(request, db)
     batch = _get_batch(db, project_id, user)
-    result: dict = {"imported": 0, "failed": 0, "items": []}
-    for sku in dict.fromkeys(s for s in payload.skus if (s or "").strip()):
-        sku = sku.strip()
-        existing = (
-            db.query(Cluster)
-            .filter_by(batch_id=batch.id, sku=sku)
-            .filter(Cluster.archived_at.is_(None))
-            .first()
-        )
-        if existing is not None:
-            result["items"].append(
-                {"sku": sku, "product_name": existing.product_name, "status": "imported", "cluster_id": str(existing.id), "error_code": None}
-            )
-            result["imported"] += 1
-            continue
-        cluster = Cluster(
-            batch_id=batch.id,
-            name=sku,
-            sku=sku,
-            product_name=sku,
-            preparation_status="draft",
-            preparation_stage="draft",
-            preparation_total=7,
-        )
-        db.add(cluster)
-        db.flush()
-        db.add(
-            SkuImportItem(
-                batch_id=batch.id,
-                cluster_id=cluster.id,
-                sku=sku,
-                attempt=1,
-                product_name=sku,
-                status="imported",
-            )
-        )
-        if payload.mode == "auto":
-            request_cluster_preparation(cluster, auto_generate=True)
-        result["items"].append(
-            {"sku": sku, "product_name": sku, "status": "imported", "cluster_id": str(cluster.id), "error_code": None}
-        )
-        result["imported"] += 1
-    db.commit()
-    return result
+    session = session_from(request) or {}
+    return import_catalog_skus(
+        db,
+        batch,
+        payload.skus,
+        erp_token=str(session.get("erp_token") or ""),
+        mode=payload.mode,
+    )
 
 
 @router.post("/{project_id}/confirm/")

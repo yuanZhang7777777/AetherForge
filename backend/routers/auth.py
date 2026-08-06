@@ -110,9 +110,10 @@ async def login(request: Request, db: Session = Depends(get_db)) -> HTMLResponse
         return _login_page("", error="<div class='error'>会话校验失败，请刷新重试</div>")
     username = (form.get("username") or "").strip()
     password = form.get("password") or ""
+    erp_token = ""
     if settings.erp_login_url:
         try:
-            user, _token = authenticate_erp_user(db, username, password)
+            user, erp_token = authenticate_erp_user(db, username, password)
         except ErpAuthError as exc:
             return _login_page("", error=f"<div class='error'>{exc}</div>")
     else:
@@ -121,7 +122,7 @@ async def login(request: Request, db: Session = Depends(get_db)) -> HTMLResponse
             return _login_page("", error="<div class='error'>用户名或密码错误</div>")
     if not user.is_active:
         return _login_page("", error="<div class='error'>账号已停用</div>")
-    payload, _ = create_session(user.id)
+    payload, _ = create_session(user.id, erp_token=erp_token)
     response = RedirectResponse(url="/", status_code=303)
     _set_session_cookie(response, payload)
     return response

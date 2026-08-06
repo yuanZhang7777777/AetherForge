@@ -40,17 +40,19 @@ def verify_password(password: str, stored: str) -> bool:
         return False
 
 
-def _session_payload(user_id: uuid.UUID | None, csrf: str) -> str:
+def _session_payload(user_id: uuid.UUID | None, csrf: str, erp_token: str = "") -> str:
     session = {"csrf": csrf}
     if user_id is not None:
         session["user_id"] = str(user_id)
+    if erp_token:
+        session["erp_token"] = erp_token
     return _serializer.dumps(session)
 
 
-def create_session(user_id: uuid.UUID) -> tuple[str, str]:
-    """返回 (cookie_value, csrf_token)。"""
+def create_session(user_id: uuid.UUID, *, erp_token: str = "") -> tuple[str, str]:
+    """返回 (cookie_value, csrf_token)。erp_token 用于 SKU 导入时查询商品目录。"""
     csrf = secrets.token_hex(24)
-    return _session_payload(user_id, csrf), csrf
+    return _session_payload(user_id, csrf, erp_token), csrf
 
 
 def parse_session(cookie_value: str | None) -> dict | None:

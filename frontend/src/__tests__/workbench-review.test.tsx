@@ -55,7 +55,7 @@ test("preserves a dirty card draft and retries with the refreshed version after 
   await waitFor(() => expect(onSave).toHaveBeenLastCalledWith({ name: "仍要保留的名称" }, 2));
 });
 
-test("keeps failed ERP SKUs visible after a partial import", async () => {
+test("keeps typed ERP SKUs and failed error notes after a partial import", async () => {
   render(<ImportPanel onUpload={vi.fn()} onImported={vi.fn()} onSkuImport={vi.fn().mockResolvedValue({
     imported: 1, failed: 1, items: [
       { sku: "OK-1", status: "imported", errorCode: null },
@@ -67,7 +67,7 @@ test("keeps failed ERP SKUs visible after a partial import", async () => {
   fireEvent.click(screen.getByRole("button", { name: "加载 SKU" }));
 
   expect(await screen.findByText("MISSING：SKU 不存在或无可用商品图片")).toBeInTheDocument();
-  expect(screen.getByLabelText("ERP SKU")).toHaveValue("MISSING");
+  expect(screen.getByLabelText("ERP SKU")).toHaveValue("OK-1\nMISSING");
 });
 
 test("accepts multiple dropped images when the browser has no folder entries", async () => {
