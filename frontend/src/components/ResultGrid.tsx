@@ -121,14 +121,18 @@ export function ResultGrid({ project }: { project: Project }) {
   return (
     <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
       <section className="space-y-5">
-        {latestBySku.map(({ sku, latest }) => (
+        {latestBySku.map(({ sku, latest }) => {
+          const completedCount = latest.filter((output) => output.status === "completed").length;
+          const totalCount = latest.length || 8;
+          const completedPercent = Math.round((completedCount / totalCount) * 100);
+          return (
           <article className="surface p-4" key={sku.id}>
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <p className="section-label">商品结果</p>
                 <h2 className="mt-1 font-semibold">{sku.name}</h2>
               </div>
-              <span className="text-sm text-slate-500">{latest.filter((output) => output.status === "completed").length} / {latest.length || 8} 已完成</span>
+              <span className="text-sm text-slate-500">{completedCount} / {totalCount} 已完成 · {completedPercent}%</span>
             </div>
             <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
               {latest.map((output) => {
@@ -164,7 +168,8 @@ export function ResultGrid({ project }: { project: Project }) {
               })}
             </div>
           </article>
-        ))}
+          );
+        })}
       </section>
       <aside className="surface h-fit p-5">
         <h2 className="font-semibold">选择式 ZIP</h2>

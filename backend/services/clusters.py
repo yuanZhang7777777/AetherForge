@@ -89,13 +89,37 @@ def update_cluster(
         for item in payload["prompts"]:
             slot_order = item.get("slot_order")
             prompt = (item.get("prompt") or "").strip()
-            if slot_order is not None and prompt:
-                edit_prompt_text(db, cluster, slot_order, prompt, actor_id)
+            display_prompt = item.get("display_prompt")
+            if slot_order is not None and (prompt or display_prompt is not None):
+                edit_prompt_text(
+                    db,
+                    cluster,
+                    slot_order,
+                    prompt,
+                    display_prompt=display_prompt,
+                    actor_id=actor_id,
+                )
         changed = True
 
     if changed:
         _touch(cluster)
-        if cluster.preparation_status == "ready":
+        # 提示词是 N2 的输出，编辑只需新建 PromptVersion（approved 随之更新），无需重跑 N2；
+        # 只有影响 N2 输入的字段变更才需要重新预备，否则会把用户刚编辑的中文提示词冲掉。
+        needs_requeue = any(
+            key in payload
+            for key in (
+                "name",
+                "product_facts",
+                "relation_type",
+                "identity_lock",
+                "prompt_override",
+                "platform_override",
+                "market_override",
+                "seller_tier_override",
+                "asset_order",
+            )
+        )
+        if cluster.preparation_status == "ready" and needs_requeue:
             _requeue(cluster)
     return cluster
 

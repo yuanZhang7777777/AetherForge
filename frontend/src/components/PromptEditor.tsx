@@ -14,8 +14,24 @@ const defaultPrompts = [
   "品质信任图",
 ].map((slot, index) => ({ slotOrder: index + 1, slot, text: "" }));
 
+// 阶段加权进度：N1=10% N2=80%(=10+70) N3=100%，当前阶段显示其累计百分比下限
+const stagePercent: Record<string, number> = {
+  N1: 10,
+  N2: 80,
+  N3: 100,
+};
+
+type PromptDraftItem = {
+  slotOrder: number;
+  slot: string;
+  text: string; // 可编辑内容：双语=中文策划，legacy=最终英文
+  finalText: string; // 出图用最终英文（双语模式只读展示）
+  hasDisplay: boolean; // 是否为双语（服务器有 displayPrompt）
+  readOnly: boolean;
+};
+
 type PromptDraft = {
-  prompts: ProductPrompt[];
+  prompts: PromptDraftItem[];
 };
 
 function visiblePromptText(prompt: ProductPrompt) {
@@ -45,7 +61,14 @@ function promptsFromSku(sku: ProductSku) {
 
 function draftFromSku(sku: ProductSku): PromptDraft {
   return {
-    prompts: promptsFromSku(sku).map((prompt) => ({ ...prompt, text: visiblePromptText(prompt) })),
+    prompts: promptsFromSku(sku).map((prompt) => ({
+      slotOrder: prompt.slotOrder,
+      slot: prompt.slot,
+      text: visiblePromptText(prompt),
+      finalText: prompt.text ?? "",
+      hasDisplay: Boolean(prompt.displayPrompt?.trim()),
+      readOnly: Boolean(prompt.readOnly),
+    })),
   };
 }
 
@@ -166,7 +189,9 @@ export function PromptEditor({
     const baseline = savedDraftRef.current;
     const prompts = next.prompts
       .filter((prompt) => !prompt.readOnly && prompt.text.trim() && prompt.text !== baseline.prompts.find((item) => item.slotOrder === prompt.slotOrder)?.text)
-      .map((prompt) => ({ slot_order: prompt.slotOrder, prompt: prompt.text }));
+      .map((prompt) => prompt.hasDisplay
+        ? { slot_order: prompt.slotOrder, display_prompt: prompt.text }
+        : { slot_order: prompt.slotOrder, prompt: prompt.text });
     if (!prompts.length) return;
     saveInFlight.current = true;
     try {
@@ -208,6 +233,7 @@ export function PromptEditor({
   const progressTotal = preparation?.total || 3;
   const progressCurrent = Math.min(preparation?.current ?? 0, progressTotal);
   const stage = preparation?.stage ?? "";
+  const progressPercent = stagePercent[stage];
   const promptStage = ["N2"].includes(stage);
   const editablePrompts = draft.prompts.filter((prompt) => !prompt.readOnly);
   const hasSourcePassthrough = editablePrompts.length < draft.prompts.length;
@@ -268,26 +294,34 @@ export function PromptEditor({
       <section className="rounded-lg bg-slate-50 p-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h3 className="text-sm font-semibold text-slate-700">{promptSectionTitle}</h3>
-          {preparing && <span className="text-xs font-semibold text-blue-700">{progressLabel} {progressCurrent}/{progressTotal}</span>}
+          {preparing && <span className="text-xs font-semibold text-blue-700">{progressLabel}{progressPercent != null ? ` · ${progressPercent}%` : ` ${progressCurrent}/${progressTotal}`}</span>}
         </div>
-        {preparing && <ProgressBar current={progressCurrent} total={progressTotal} />}
+        {preparing && <ProgressBar current={progressCurrent} total={progressTotal} percent={progressPercent ?? undefined} />}
         <div className="mt-3 grid gap-3 md:grid-cols-2">
           {editablePrompts.map((prompt, index) => {
             const displayOrder = hasSourcePassthrough ? index + 1 : prompt.slotOrder;
             const label = `${String(displayOrder).padStart(2, "0")} ${slotLabel(prompt.slot, prompt.slotOrder)}提示词`;
             return (
-            <label className="block text-sm font-medium text-slate-700" key={prompt.slotOrder}>
-              <span className="mb-2 block">{label}</span>
-              <textarea
-                aria-label={label}
-                disabled={prompt.readOnly}
-                placeholder={prompt.text.trim() ? "" : promptPlaceholder(displayOrder)}
-                value={prompt.text}
-                onChange={(event) => updatePrompt(prompt.slotOrder, event.target.value)}
-                onBlur={() => void save()}
-              />
-              {prepared && !prompt.text.trim() && <p className="mt-1 text-xs text-rose-700">此槽位提示词缺失，请重新预备生成</p>}
-            </label>
+            <div className="space-y-2" key={prompt.slotOrder}>
+              <label className="block text-sm font-medium text-slate-700">
+                <span className="mb-2 block">{label}{prompt.hasDisplay ? " · 中文策划" : ""}</span>
+                <textarea
+                  aria-label={`${label}${prompt.hasDisplay ? "中文策划" : ""}`}
+                  disabled={prompt.readOnly}
+                  placeholder={prompt.text.trim() ? "" : promptPlaceholder(displayOrder)}
+                  value={prompt.text}
+                  onChange={(event) => updatePrompt(prompt.slotOrder, event.target.value)}
+                  onBlur={() => void save()}
+                />
+                {prepared && !prompt.text.trim() && <p className="mt-1 text-xs text-rose-700">此槽位提示词缺失，请重新预备生成</p>}
+              </label>
+              {prompt.hasDisplay && (
+                <label className="block text-sm font-medium text-slate-700">
+                  <span className="mb-2 block text-slate-500">出图用英文（生成时按中文重新翻译）</span>
+                  <textarea aria-label={`${label}出图用英文`} className="bg-slate-100 text-slate-500" readOnly value={prompt.finalText} />
+                </label>
+              )}
+            </div>
           );
           })}
         </div>
@@ -296,9 +330,10 @@ export function PromptEditor({
   );
 }
 
-function ProgressBar({ current, total }: { current: number; total: number }) {
-  const percent = total ? Math.max(12, Math.min(100, Math.round((current / total) * 100))) : 12;
-  return <div className="progress-track mt-3" aria-label="预备生成进度" role="progressbar" aria-valuemin={0} aria-valuemax={total} aria-valuenow={current}><span className="progress-fill progress-fill-active" style={{ width: `${percent}%` }} /></div>;
+function ProgressBar({ current, total, percent }: { current: number; total: number; percent?: number }) {
+  const value = percent ?? (total ? Math.round((Math.min(current, total) / total) * 100) : 12);
+  const width = Math.max(12, Math.min(100, value));
+  return <div className="progress-track mt-3" aria-label="预备生成进度" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={value}><span className="progress-fill progress-fill-active" style={{ width: `${width}%` }} /></div>;
 }
 
 function FactEvidence({ fact }: { fact: PromptFact }) {

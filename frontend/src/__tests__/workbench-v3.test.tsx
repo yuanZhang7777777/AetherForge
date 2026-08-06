@@ -285,7 +285,7 @@ test("shows editable compact card fields and exact preparation progress without 
   expect(screen.getByLabelText("商品平台 桌面灯")).toHaveDisplayValue("跟随项目");
   expect(screen.getByLabelText("商品国家 桌面灯")).toHaveDisplayValue("跟随项目");
   expect(screen.queryByLabelText("单品风格 桌面灯")).not.toBeInTheDocument();
-  expect(screen.getAllByText("正在写提示词 · 2/3")).toHaveLength(2);
+  expect(screen.getAllByText("正在写提示词 · 80%")).toHaveLength(2);
   expect(screen.getAllByRole("progressbar", { name: "预备生成进度" })).not.toHaveLength(0);
   expect(screen.getByLabelText("商品名称 桌面灯")).toHaveAttribute("placeholder", "可不填，预备生成时识别");
   expect(screen.getByRole("button", { name: "全选" })).toBeInTheDocument();
@@ -313,7 +313,7 @@ test("shows the active preparation stage instead of queued when a stage is prese
   stubFetch({ projectSnapshot: stagedProject });
   renderApp();
 
-  expect(await screen.findByText("正在识别商品 · 0/3")).toBeInTheDocument();
+  expect(await screen.findByText("正在识别商品 · 10%")).toBeInTheDocument();
   expect(screen.queryByText(/预备排队中/)).not.toBeInTheDocument();
 });
 
@@ -490,7 +490,7 @@ test("reports mixed generation failures without per-product market overrides", a
   renderApp();
 
   await screen.findByLabelText("商品名称 桌面灯");
-  expect(screen.getByText(/有 2 张失败/)).toHaveTextContent("出图已结束 · 6/8 · 有 2 张失败");
+  expect(screen.getByText(/有 2 张失败/)).toHaveTextContent("出图已结束 · 6/8 · 75% · 有 2 张失败");
   expect(screen.queryByText(/预备完成/)).not.toBeInTheDocument();
   expect(fetchMock.mock.calls.some(([url]) => String(url) === "/api/clusters/one/")).toBe(false);
 });
@@ -509,7 +509,7 @@ test("shows active generation progress without a 0/0 denominator", async () => {
   renderApp();
 
   await screen.findByLabelText("商品名称 桌面灯");
-  expect(screen.getByText("出图中 · 0/9")).toBeInTheDocument();
+  expect(screen.getByText("出图中 · 0/9 · 0%")).toBeInTheDocument();
   expect(screen.queryByText(/0\/0/)).not.toBeInTheDocument();
 });
 
@@ -556,7 +556,7 @@ test("shows write-prompt progress without source-photo overcounting", async () =
   stubFetch({ projectSnapshot: preparingProject });
   renderApp();
 
-  expect(await screen.findByText("正在写提示词 · 2/3")).toBeInTheDocument();
+  expect(await screen.findByText("正在写提示词 · 80%")).toBeInTheDocument();
   expect(screen.queryByText(/正在生成 1\+8 提示词/)).not.toBeInTheDocument();
 });
 

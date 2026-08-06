@@ -286,6 +286,12 @@ class PreflightResult(BaseModel):
 
 
 # ---------------------------------------------------------------- cluster 操作
+class PromptsItem(BaseModel):
+    slot_order: int
+    prompt: str | None = None
+    display_prompt: str | None = None
+
+
 class ClusterUpdateInput(BaseModel):
     name: str | None = None
     product_facts: str | None = None
@@ -295,7 +301,7 @@ class ClusterUpdateInput(BaseModel):
     platform_override: str | None = None
     market_override: str | None = None
     seller_tier_override: str | None = None
-    prompts: list[dict[str, Any]] | None = None
+    prompts: list[PromptsItem] | None = None
     asset_order: list[str] | None = None
 
 

@@ -216,6 +216,44 @@ test("autosaves edited prompts as a structured snake-case array", async () => {
   });
 });
 
+test("shows editable Chinese planning plus readonly English final and saves display_prompt for bilingual prompts", async () => {
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ csrf_token: "csrf" }) })
+    .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ id: "cluster-1", version: 4 }) });
+  vi.stubGlobal("fetch", fetchMock);
+  render(
+    <PromptEditor
+      sku={{
+        ...sku,
+        prompts: [{
+          slotOrder: 1,
+          slot: "白底标准图",
+          text: "Create a clean white-background hero. Show this exact text: \"พร้อมใช้ทุกวัน\".",
+          displayPrompt: "纯白背景，突出完整商品，干净易上架",
+        }],
+      }}
+      onSave={(payload) => updateCluster(sku.id, sku.version, payload)}
+    />,
+  );
+
+  const zh = screen.getByLabelText("01 白底标准图提示词中文策划") as HTMLTextAreaElement;
+  expect(zh.value).toBe("纯白背景，突出完整商品，干净易上架");
+  const en = screen.getByLabelText("01 白底标准图提示词出图用英文") as HTMLTextAreaElement;
+  expect(en.value).toBe("Create a clean white-background hero. Show this exact text: \"พร้อมใช้ทุกวัน\".");
+  expect(en.readOnly).toBe(true);
+  expect(screen.getByText("01 白底标准图提示词 · 中文策划")).toBeInTheDocument();
+  expect(screen.getByText("出图用英文（生成时按中文重新翻译）")).toBeInTheDocument();
+
+  fireEvent.change(zh, { target: { value: "新中文策划：强调一体式机身" } });
+  fireEvent.blur(zh);
+
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+  expect(JSON.parse(String(fetchMock.mock.calls[1][1].body))).toMatchObject({
+    expected_version: 3,
+    prompts: [{ slot_order: 1, display_prompt: "新中文策划：强调一体式机身" }],
+  });
+});
+
 test("keeps dirty identity and prompt drafts across a polling snapshot", () => {
   const view = render(<PromptEditor sku={sku} onSave={() => undefined} />);
 

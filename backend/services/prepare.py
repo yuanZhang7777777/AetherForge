@@ -70,7 +70,11 @@ def _prepare(db: Session, cluster: Cluster, actor_id) -> None:
     analysis["_preparation_site"] = frozen_site
     cluster.analysis_snapshot = analysis
 
-    if cluster.batch.ai_recognition_enabled:
+    # 名称+补充信息都填全 → 跳过 N1 视觉识别（省一次 APIMart 调用，不覆盖用户填写）；
+    # 只缺一项才跑 N1，_merge_recognition 按字段独立只补缺项，永不覆盖用户填写。
+    if cluster.batch.ai_recognition_enabled and not (
+        (cluster.product_name or "").strip() and (cluster.product_facts or "").strip()
+    ):
         _n1_vision_fill(db, cluster)
         _merge_recognition(db, cluster)
 
@@ -220,7 +224,7 @@ def _n3_fact_ledger(cluster: Cluster) -> None:
 
 
 # ---------------------------------------------------------------- N2 写提示词（一次 DeepSeek 调用）
-def _n_prompts(db: Session, cluster: Cluster, site: str) -> tuple[str, dict[int, str]]:
+def _n_prompts(db: Session, cluster: Cluster, site: str) -> tuple[str, dict[int, dict]]:
     template = cluster.batch.output_template or global_fallback_template(db)
     slots = [
         {"order": s.order, "name": s.name}
@@ -247,7 +251,7 @@ def _n_prompts(db: Session, cluster: Cluster, site: str) -> tuple[str, dict[int,
     raw = node.get("prompts") if isinstance(node, dict) else None
     if not isinstance(raw, list):
         raise PreparationFailed("写提示词未返回 prompts 数组")
-    prompts: dict[int, str] = {}
+    prompts: dict[int, dict] = {}
     for item in raw:
         if not isinstance(item, dict):
             continue
@@ -255,9 +259,13 @@ def _n_prompts(db: Session, cluster: Cluster, site: str) -> tuple[str, dict[int,
             slot = int(item.get("slot") or 0)
         except (TypeError, ValueError):
             continue
-        text = str(item.get("prompt") or "").strip()
-        if slot >= 1 and text:
-            prompts[slot] = text
+        final = str(item.get("final") or item.get("prompt") or "").strip()  # 兼容旧模型输出
+        if slot >= 1 and final:
+            prompts[slot] = {
+                "final": final,
+                "zh": str(item.get("zh") or "").strip(),
+                "target_language_copy": str(item.get("target_language_copy") or "").strip(),
+            }
     return style_brief, prompts
 
 

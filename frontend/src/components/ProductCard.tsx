@@ -19,6 +19,13 @@ const stageText: Record<string, string> = {
   N3: "正在整理出图请求",
 };
 
+// 阶段加权进度：N1=10% N2=80%(=10+70) N3=100%，当前阶段显示其累计百分比下限
+const stagePercent: Record<string, number> = {
+  N1: 10,
+  N2: 80,
+  N3: 100,
+};
+
 function cleanChineseProductText(value: string) {
   const text = translateKnownProductText(String(value || "").trim());
   if (!text) return "";
@@ -116,29 +123,38 @@ function draftFromSku(sku: ProductSku): Draft {
   };
 }
 
+function safePercent(current: number, total: number) {
+  if (!total) return 0;
+  return Math.round((Math.min(current, total) / total) * 100);
+}
+
 function progressText(sku: ProductSku) {
   const generation = sku.generationProgress;
   const generated = generation?.completed ?? generation?.current ?? 0;
   const generationTotal = generation?.total || expectedGenerationTotal(sku);
   const failed = generation?.failed ?? 0;
   const failureText = failed ? ` · 有 ${failed} 张失败` : "";
-  if (generation?.active || (generation?.status && !["idle", "completed", "failed"].includes(generation.status) && generated + failed < generationTotal)) return `出图中 · ${generated}/${generationTotal}${failureText}`;
-  if (failed) return `出图已结束 · ${generated}/${generationTotal}${failureText}`;
-  if (generationTotal && generated === generationTotal) return `出图完成 · ${generated}/${generationTotal}`;
+  if (generation?.active || (generation?.status && !["idle", "completed", "failed"].includes(generation.status) && generated + failed < generationTotal)) return `出图中 · ${generated}/${generationTotal} · ${safePercent(generated, generationTotal)}%${failureText}`;
+  if (failed) return `出图已结束 · ${generated}/${generationTotal} · ${safePercent(generated, generationTotal)}%${failureText}`;
+  if (generationTotal && generated === generationTotal) return `出图完成 · ${generated}/${generationTotal} · 100%`;
   const preparation = sku.preparation;
   const status = preparation?.status ?? sku.preparationStatus ?? "pending";
-  if (status === "ready") return `预备完成 · ${preparation?.total || 3}/${preparation?.total || 3}`;
+  if (status === "ready") return `预备完成 · 100%`;
   if (status === "preparing") {
     const stage = preparation?.stage ?? "";
-    return `${stage ? stageText[stage] ?? "正在处理商品" : "正在预备生成"} · ${preparation?.current ?? 0}/${preparation?.total ?? 3}`;
+    const percent = stagePercent[stage];
+    if (percent != null) return `${stage ? stageText[stage] ?? "正在处理商品" : "正在预备生成"} · ${percent}%`;
+    return `正在预备生成 · ${preparation?.current ?? 0}/${preparation?.total ?? 3}`;
   }
   if (status === "pending" && preparation?.stage && preparation.stage !== "queued") {
+    const percent = stagePercent[preparation.stage];
+    if (percent != null) return `${stageText[preparation.stage] ?? "正在处理商品"} · ${percent}%`;
     return `${stageText[preparation.stage] ?? "正在处理商品"} · ${preparation?.current ?? 0}/${preparation?.total ?? 3}`;
   }
-  if (status === "pending") return `预备排队中 · ${preparation?.current ?? 0}/${preparation?.total ?? 3}`;
+  if (status === "pending") return `正在预备生成 · 排队中`;
   if (status === "blocked") return `需要补充信息${preparation?.error ? ` · ${friendlyPreparationError(preparation.error)}` : ""}`;
   if (status === "failed") return `预备未完成${preparation?.error ? ` · ${friendlyPreparationError(preparation.error)}` : ""}`;
-  return `待预备生成 · ${preparation?.current ?? 0}/${preparation?.total ?? 3}`;
+  return `待预备生成`;
 }
 
 function friendlyPreparationError(error: string) {
@@ -156,11 +172,11 @@ function progressMeta(sku: ProductSku) {
   const generated = generation?.completed ?? generation?.current ?? 0;
   const generationTotal = generation?.total || expectedGenerationTotal(sku);
   if (generation?.active || (generation?.status && !["idle", "completed", "failed"].includes(generation.status) && generated + (generation.failed ?? 0) < generationTotal)) {
-    return { text: progressText(sku), current: generated, total: generationTotal, active: true };
+    return { text: progressText(sku), current: generated, total: generationTotal, active: true, percent: safePercent(generated, generationTotal) };
   }
   const preparation = sku.preparation;
   if (["pending", "preparing"].includes(preparation?.status ?? sku.preparationStatus ?? "")) {
-    return { text: progressText(sku), current: preparation?.current ?? 0, total: preparation?.total ?? 3, active: true };
+    return { text: progressText(sku), current: preparation?.current ?? 0, total: preparation?.total ?? 3, active: true, percent: stagePercent[preparation?.stage ?? ""] };
   }
   return { text: progressText(sku), current: 0, total: 0, active: false };
 }
@@ -271,7 +287,7 @@ export function ProductCard({ sku, assets, selected, expanded = false, onOpen = 
         {saveError && <p className="text-xs text-amber-700">{saveError}</p>}
         <div className="mt-auto space-y-2 text-xs">
           <div className="grid gap-1"><span className={`block max-w-full break-words leading-5 ${progress.active ? "rounded-lg bg-blue-50 px-2 py-1 font-semibold text-blue-700" : /失败|受阻|未完成|补充/.test(progress.text) ? "rounded-lg bg-rose-50 px-2 py-1 text-rose-700" : "text-slate-600"}`} title={progress.text}>{progress.active && <span className="mr-1 inline-block size-1.5 animate-pulse rounded-full bg-blue-600" />} {progress.text}</span><div className="flex flex-wrap gap-2"><button aria-label={`${label} 详情`} className="w-fit font-semibold text-blue-700" type="button" onClick={onOpen}>详情</button>{progress.active && onPause && <button aria-label={`暂停 ${label}`} className="w-fit font-semibold text-amber-700" type="button" disabled={disabled} onClick={onPause}>暂停</button>}</div></div>
-          {progress.active && <ProgressBar current={progress.current} total={progress.total} />}
+          {progress.active && <ProgressBar current={progress.current} total={progress.total} percent={progress.percent} />}
         </div>
       </div>
     </article>
@@ -334,8 +350,9 @@ function DraggableAsset({ asset, index, active, onPreview, onDelete, disabled }:
   return <div className="relative size-12 shrink-0" role="listitem"><button ref={setRef} style={style} {...draggable.listeners} {...draggable.attributes} data-dnd-activator aria-label={`查看并拖拽商品参考图 ${index + 1}`} className={`size-12 overflow-hidden rounded-lg border bg-slate-100 ${active ? "border-blue-500 ring-2 ring-blue-200" : droppable.isOver ? "border-blue-500 ring-2 ring-blue-200" : "border-slate-200"}`} onClick={(event) => { event.stopPropagation(); onPreview(); }}>{asset.imageUrl ? <img className="size-full object-contain" src={asset.imageUrl} alt={`商品参考图 ${index + 1}`} loading="lazy" decoding="async" /> : <span className="grid size-full place-items-center text-xs text-slate-400">待预览</span>}</button>{index === 0 && <span className="pointer-events-none absolute bottom-0.5 left-0.5 rounded bg-slate-950/80 px-1 text-[10px] text-white">主</span>}<button aria-label={`删除商品参考图 ${index + 1}`} className="absolute -right-1 -top-1 grid size-5 place-items-center rounded-full bg-slate-950 text-xs text-white" type="button" disabled={disabled} onClick={(event) => { event.stopPropagation(); if (window.confirm(`删除第 ${index + 1} 张商品参考图？`)) onDelete(); }}>×</button></div>;
 }
 
-function ProgressBar({ current, total }: { current: number; total: number }) {
+function ProgressBar({ current, total, percent }: { current: number; total: number; percent?: number }) {
   const safeTotal = total || 1;
-  const percent = Math.max(12, Math.min(100, Math.round((current / safeTotal) * 100)));
-  return <div className="progress-track" aria-label="预备生成进度" role="progressbar" aria-valuemin={0} aria-valuemax={safeTotal} aria-valuenow={Math.min(current, safeTotal)}><span className="progress-fill progress-fill-active" style={{ width: `${percent}%` }} /></div>;
+  const value = percent ?? Math.round((Math.min(current, safeTotal) / safeTotal) * 100);
+  const width = Math.max(12, Math.min(100, value));
+  return <div className="progress-track" aria-label="预备生成进度" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={value}><span className="progress-fill progress-fill-active" style={{ width: `${width}%` }} /></div>;
 }

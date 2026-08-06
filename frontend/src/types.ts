@@ -116,7 +116,7 @@ export interface ClusterUpdateInput {
   platform_override?: string | null;
   market_override?: string | null;
   seller_tier_override?: "general" | "mall" | null;
-  prompts?: { slot_order: number; prompt: string }[];
+  prompts?: { slot_order: number; prompt?: string; display_prompt?: string }[];
   asset_order?: string[];
 }
 

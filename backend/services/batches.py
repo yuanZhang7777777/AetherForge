@@ -4,11 +4,12 @@ from __future__ import annotations
 from sqlalchemy.orm import Session
 
 from ..ids import safe_uuid
-from ..models import Batch, Cluster, User
+from ..models import Batch, Cluster, Generation, User
 from ..storage import get_storage
 from .assets import request_cluster_preparation
 from .contract import cluster_preparation_is_current, invalidate_preparation
 from .export import build_export_zip
+from .generation import ACTIVE_GENERATION_STATUSES
 from .serialize import _public_product_name
 from .template import global_fallback_template
 
@@ -81,6 +82,26 @@ def request_preparation_items(db: Session, batch: Batch, cluster_ids: list[str])
                     "stage": "blocked",
                     "code": "name_required",
                     "message": "请先填写商品名称",
+                }
+            )
+            continue
+        if (
+            db.query(Generation.id)
+            .filter(
+                Generation.cluster_id == cluster.id,
+                Generation.status.in_(ACTIVE_GENERATION_STATUSES),
+            )
+            .limit(1)
+            .first()
+            is not None
+        ):
+            items.append(
+                {
+                    "cluster_id": cluster_id,
+                    "status": "blocked",
+                    "stage": "blocked",
+                    "code": "generation_active",
+                    "message": "已有出图任务正在执行，完成后才能重新预备",
                 }
             )
             continue

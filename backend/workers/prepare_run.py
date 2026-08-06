@@ -19,18 +19,23 @@ def run_prepare_job(cluster_id: str, claimed_revision: int) -> None:
         if cluster is None or cluster.preparation_status != "preparing":
             return
         ok = run_cluster_preparation(db, cluster)
-        if ok:
-            current_revision = int((cluster.analysis_snapshot or {}).get("_preparation_revision", 0))
-            if current_revision != claimed_revision:
-                # 处理期间被编辑 → 重新排队，让最新配置重跑
-                cluster.preparation_status = "pending"
-                cluster.preparation_stage = "queued"
-                cluster.preparation_error = "商品信息在处理期间更新，已重新排队"
-                db.commit()
-                return
-            db.commit()  # 先落库 ready，再独立处理自动出图
-            if cluster.auto_generate:
-                _auto_generate(db, cluster)
+        current_revision = int((cluster.analysis_snapshot or {}).get("_preparation_revision", 0))
+        edited_during_run = current_revision != claimed_revision
+        if edited_during_run:
+            # 处理期间被编辑（无论成败）→ 重新排队，让最新配置重跑
+            cluster.preparation_status = "pending"
+            cluster.preparation_stage = "queued"
+            cluster.preparation_error = "商品信息在处理期间更新，已重新排队"
+            db.commit()
+            return
+        if not ok:
+            # 真失败：必须落库 failed（此前遗漏——失败状态被 session.close 回滚，卡片永远卡在 preparing，
+            # 且 claim 循环只认 pending，无法重试）
+            db.commit()
+            return
+        db.commit()  # 先落库 ready，再独立处理自动出图
+        if cluster.auto_generate:
+            _auto_generate(db, cluster)
 
 
 def _auto_generate(db: Session, cluster: Cluster) -> None:

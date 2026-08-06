@@ -370,6 +370,14 @@ def n_prompts_system(site: str) -> str:
         + "\n\n"
         + _site_rules(site, local)
         + "\n\n"
+        "# 商品补充信息的处理（user 消息里的「商品补充信息」是用户填写的原始文字）\n"
+        "- 用户可能在一个框里混写多种信息：风格（如 ins 风/极简/高级感/暖色调）、材质、尺寸/容量/重量、"
+        "部件数量、卖点、使用场景、甚至几句风格提示词。不要照抄原句，先逐条读懂并自行归类：\n"
+        "  - 风格类 → 吸收进顶层 style_brief，贯穿整套，让所有张服从同一套语言；\n"
+        "  - 规格类（尺寸/容量/重量/材质/部件数量等）→ 作为事实依据如实使用，尤其第 6 张「尺寸材质图」"
+        "要把真实尺寸与材质直观呈现出来，其他张涉及这些规格时也不得虚构、不得改数字；\n"
+        "  - 卖点/场景类 → 设计成对应张的创意概念与文案。\n"
+        "- 补充信息就是你的商品事实来源：身份锁没给、补充信息也没给的外观细节，IDENTITY 段仍不得自行补充（规则不变）。\n\n"
         "# 每张最终英文提示词的结构（你输出的每个 prompt 字段必须是这样一段自包含的完整英文生图提示词）\n"
         "1. IDENTITY: 复述身份锁关键不变量，写死硬约束句 `The reference product has exactly N [component]`"
         "（部件与数量必须与身份锁一致），加 `Keep exactly this verified component count and arrangement.`。"
@@ -390,9 +398,18 @@ def n_prompts_system(site: str) -> str:
         "high-contrast and readable, integrated as part of the composition; do not add label words:` "
         "后接文案的每一行。\n"
         "5. EMPHASIS: 强调点（卖点视觉化、本地风格、无乱码、无水印）。\n\n"
+        "# 每张同时输出中文策划与最终英文提示词\n"
+        "- 每个槽位输出两个文本：\n"
+        "  - **zh**：这一张的**中文创作策划**（用户可编辑，供展示与修改）：写清创意概念、构图、氛围、光线、"
+        "文案意图、要强调的卖点/事实，自包含、可独立理解；不含当地语文案本身。\n"
+        "  - **final**：这一张的**最终英文生图提示词**（出图用），严格按上面的 5 段结构写，TEXT RENDERING 段"
+        "把本张当地语文案原样逐字嵌入。\n"
+        "  - **target_language_copy**：本张的当地语文案（final 的 TEXT RENDERING 段逐字嵌入的那份），"
+        "单独存一份，供生成时重译逐字保留。\n"
         "# 输出格式\n"
         '只输出一个 JSON 对象 {"style_brief": "整套统一美术风格（一句话，中文，供所有张共用）", '
-        '"prompts": [每张一个对象：{"slot": 1到9的整数, "prompt": "该张完整的最终英文生图提示词"}]}。\n'
+        '"prompts": [每张一个对象：{"slot": 1到9的整数, "zh": "中文创作策划", "final": "最终英文生图提示词", '
+        '"target_language_copy": "本张当地语文案"}]}。\n'
         "prompts 数组长度严格为 9，slot 覆盖 1–9，顺序与上面的 9 张固定结构一一对应。不要 Markdown、不要解释。"
     )
 
@@ -428,12 +445,69 @@ def n_prompts_user(
     lines = [
         f"商品名称：{product_name}",
         f"身份锁（商品本体必须逐张服从，不可改变）：{identity_lock}",
-        f"唯一真实卖点 points：{'；'.join(points) if points else '(未提供，则相应图的文案省略对应卖点)'}",
+        "商品补充信息（用户填写的原始文字，未做分类——可能混着风格/材质/尺寸/容量/重量/部件数量/卖点/"
+        "使用场景/风格提示词等，请按系统提示词的「商品补充信息的处理」自行读懂、归类后使用）："
+        + ("\n" + "\n".join(f"  - {p}" for p in points) if points else "(未提供)"),
         f"人物策略：{person_policy}",
         f"本站点模板槽位（共 {len(slots)} 个，prompts 数组按此顺序对齐）：\n{slot_lines}",
         "",
-        "请严格按系统提示词的 9 张固定结构设计并输出 JSON，prompts 数组长度必须等于槽位数，"
-        "每张的最终英文提示词要自包含、可直接交给图像模型。",
+        "请严格按系统提示词的 9 张固定结构设计并输出 JSON，prompts 数组长度必须等于槽位数。"
+        "每个槽位必须同时输出 zh（中文创作策划）与 final（最终英文生图提示词，出图用），"
+        "zh 与 final 一一对应，final 要自包含、可直接交给图像模型。",
+    ]
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------- 生成时重译（用户改中文策划后）
+def retranslate_final_prompt(site: str) -> str:
+    """把用户编辑后的中文策划重译成 5 段英文生图提示词（生成时调用，轻量推理）。"""
+    local = SITES.get(site, {})
+    return (
+        "你是电商生图提示词翻译器。用户修改了某一张图的中文创作策划（zh），请把它重译成可以直接交给"
+        "图像模型生成的 5 段英文生图提示词。只输出 JSON。\n\n"
+        "# 身份锁（商品本体不可变，必须服从）\n"
+        + IDENTITY_LOCK_RULES
+        + "\n\n"
+        + _site_rules(site, local)
+        + "\n\n"
+        "# 输出的 final 必须按固定 5 段组织\n"
+        "1. IDENTITY: 复述身份锁关键不变量，写死硬约束句 `The reference product has exactly N [component]`"
+        "（部件与数量必须与身份锁一致），加 `Keep exactly this verified component count and arrangement.`。"
+        "IDENTITY 段只复述身份锁中明确给出的信息，禁止自行补充未给定的部件外观细节，不得虚构。\n"
+        "2. REAL USE RELATIONSHIP: 若中文策划含人物，描述人物与商品的真实使用关系（动作、接触方式、部位）；"
+        "否则跳过此段。\n"
+        "3. COMPOSITION: 依据中文策划的创意概念/构图/氛围/光线/道具/配色，翻译成有画面感的英文——"
+        "明确景别、机位、角度、背景、场景、道具、光线、配色、质感；整件商品必须可辨认；禁止平淡描述。\n"
+        "4. TEXT RENDERING: 把传入的当地语文案**原样逐字**嵌入这一段，不得翻译、不得转写、不得改写成英文；"
+        "字符必须完全一致（泰文就是泰文，逐字符保留）。同时要求图像模型把文字设计成与场景情绪相配的醒目排版"
+        "（合适的粗细、大小、颜色、半透明底条/阴影/描边/强调色），保证清晰可读。写法："
+        "`Render the following text exactly, each line appears exactly once, in <语言>; "
+        "every character must be glyph-accurate for <语言>, spelled correctly; "
+        "design the typography to fit the scene's mood — choose suitable weight, size, color, "
+        "optional translucent banner, drop shadow, outline or accent color so the text is bold, "
+        "high-contrast and readable, integrated as part of the composition; do not add label words:` "
+        "后接当地语文案的每一行。\n"
+        "5. EMPHASIS: 强调点（卖点视觉化、本地风格、无乱码、无水印）。\n"
+        "硬性要求：不得添加身份锁之外的部件；不得改变精确数量；当地语文案必须原样逐字出现，禁止翻译或改写。"
+    )
+
+
+def retranslate_final_user(
+    zh: str,
+    identity_lock: str,
+    points: list[str],
+    site: str,
+    target_language_copy: str,
+) -> str:
+    lines = [
+        f"站点：{site}（消费者可见文案语言：{SITES.get(site, {}).get('copy', site)}）",
+        f"身份锁（商品本体不可变）：{identity_lock}",
+        f"商品补充信息：{'；'.join(points) if points else '(未提供)'}",
+        f"本张中文创作策划（用户已编辑，以此为准，不得忽略）：{zh}",
+        f"本张当地语文案（final 的 TEXT RENDERING 段必须原样逐字嵌入，不得修改、不得增删）："
+        f"{target_language_copy or '(无)'}",
+        "",
+        '只输出一个 JSON 对象 {"final": "完整的 5 段英文生图提示词"}。',
     ]
     return "\n".join(lines)
 

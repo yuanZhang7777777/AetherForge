@@ -111,9 +111,16 @@ export default function ProjectGrouping() {
     onMutate: () => { const previous = queryClient.getQueryData<Project>(["project", projectId]); markSelectedPreparing(); setActionNotice(""); return { previous }; },
     onSuccess: (data) => {
       const items = (data as { items?: { status?: string; code?: string; message?: string }[] } | undefined)?.items ?? [];
-      const nameBlocked = items.find((item) => item.code === "name_required");
-      setActionNotice(nameBlocked ? nameBlocked.message || "请先填写商品名称，再预备生成" : "");
-      return invalidate();
+      const blocked = items.find((item) => item.status === "blocked");
+      if (blocked) {
+        setActionNotice(blocked.code === "name_required" ? blocked.message || "请先填写商品名称，再预备生成" : blocked.message || "部分商品无法预备");
+        // 有失败项 → refetch 服务器真实状态，避免乐观的「正在预备」盖在未启动的商品上
+        return invalidate();
+      }
+      setActionNotice("");
+      // 全部成功：不 invalidate project，避免 refetch 把乐观的「正在预备生成」打回服务器 pending 造成闪变；
+      // 真实阶段由 progress 轮询（active 才轮）接管。
+      return queryClient.invalidateQueries({ queryKey: ["workspace"] });
     },
     onError: (_error, _variables, context) => rollbackProject(context),
   });

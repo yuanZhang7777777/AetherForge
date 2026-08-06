@@ -18,7 +18,7 @@ from ..config import settings
 from ..db import SessionLocal
 from ..models import Batch, Generation, ResultAsset
 from ..providers import APIMartClient, DeepSeekClient, ProviderError
-from ..prompts import n5_simplify_prompt
+from ..prompts import n5_simplify_prompt, retranslate_final_prompt, retranslate_final_user
 from ..storage import get_storage
 
 log = logging.getLogger("aetherforge.generation_worker")
@@ -148,6 +148,36 @@ def _simplify_prompt(db: Session, gen: Generation) -> bool:
     return True
 
 
+def _retranslate(db: Session, gen: Generation) -> bool:
+    """用户改过中文策划：按最新中文重译出最终英文 final，覆盖本次提交用，不落库。"""
+    snapshot = gen.rule_snapshot or {}
+    try:
+        result = DeepSeekClient().complete_json(
+            retranslate_final_prompt(snapshot.get("site") or ""),
+            retranslate_final_user(
+                str(snapshot.get("zh") or ""),
+                str(snapshot.get("identity_lock") or ""),
+                list(snapshot.get("facts") or []),
+                snapshot.get("site") or "",
+                str(snapshot.get("target_language_copy") or ""),
+            ),
+            reasoning_effort="low",
+            max_tokens=4096,
+            thinking=False,
+        )
+        node = result["json"]
+        english = str(node.get("final") or "").strip() if isinstance(node, dict) else ""
+        if not english:
+            gen.failure_reason = "中文提示词翻译返回为空"
+            return False
+        gen.prompt_text = english
+    except (ProviderError, ValueError, KeyError) as exc:
+        log.warning("retranslate zh prompt failed: %s", exc)
+        gen.failure_reason = f"中文提示词翻译失败：{exc}"
+        return False
+    return True
+
+
 def _finalize_completed(db: Session, gen: Generation, url: str, client: APIMartClient) -> None:
     try:
         data = client.download(url)
@@ -202,6 +232,11 @@ def _attempt(db: Session, gen: Generation, client: APIMartClient) -> None:
             gen.status = "failed"
             gen.failure_reason = "提示词已过期（旧版中文），请重新预备生成"
             return
+        # 用户改过中文策划 → 生成时重译成无歧义英文 final（当地语文案逐字保留），仅本次提交用、不落库
+        if gen.rule_snapshot.get("zh_edited"):
+            if not _retranslate(db, gen):
+                gen.status = "failed"
+                return
         task_id = _submit(db, gen, client)
         if task_id is None:
             gen.status = "failed"

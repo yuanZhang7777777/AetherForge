@@ -45,10 +45,26 @@ def _build_generation(
     user: User,
     attempt: int,
 ) -> Generation:
+    from .prompt_compile import _facts, _snapshot_site
     from .serialize import _effective_config
 
     effective = _effective_config(cluster.batch, cluster)
     template = cluster.batch.output_template or global_fallback_template(db)
+    structured = prompt_version.structured_output or {}
+    if not isinstance(structured, dict):
+        structured = {}
+    rule_snapshot: dict = {"prompt_lang": structured.get("lang", "en")}
+    if structured.get("zh_edited"):
+        # 用户改过中文策划：生成时由 generation-worker 按最新中文重译 final，
+        # 快照重译所需输入（身份锁/事实/当地语文案/站点）。
+        rule_snapshot["zh_edited"] = True
+        rule_snapshot["zh"] = str(structured.get("display_prompt") or "").strip()
+        rule_snapshot["target_language_copy"] = str(
+            structured.get("target_language_copy") or ""
+        ).strip()
+        rule_snapshot["site"] = _snapshot_site(cluster)
+        rule_snapshot["identity_lock"] = (cluster.identity_lock or "").strip()
+        rule_snapshot["facts"] = _facts(cluster)
     generation = Generation(
         batch_id=cluster.batch_id,
         cluster_id=cluster.id,
@@ -68,7 +84,7 @@ def _build_generation(
             "slot_order": slot.order,
             "slot_name": slot.name,
         },
-        rule_snapshot={"prompt_lang": (prompt_version.structured_output or {}).get("lang", "en")},
+        rule_snapshot=rule_snapshot,
     )
     db.add(generation)
     db.flush()

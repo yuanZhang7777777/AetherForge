@@ -67,8 +67,8 @@ class Settings:
     reasoning_effort_compile: str = field(default_factory=lambda: os.getenv("REASONING_EFFORT_COMPILE", "low"))
     deepseek_temperature: float = field(default_factory=lambda: _float(os.getenv("DEEPSEEK_TEMPERATURE"), 1.3))
     max_tokens_deep: int = field(default_factory=lambda: _int(os.getenv("MAX_TOKENS_DEEP"), 16384))
-    # 写提示词单次调用：think 高会把额度全烧在推理上，须留足输出空间给 9 张完整英文提示词
-    max_tokens_prompts: int = field(default_factory=lambda: _int(os.getenv("MAX_TOKENS_PROMPTS"), 32768))
+    # 写提示词单次调用：think 高会把额度全烧在推理上，须留足输出空间给 9 张的 zh+final 双份提示词
+    max_tokens_prompts: int = field(default_factory=lambda: _int(os.getenv("MAX_TOKENS_PROMPTS"), 49152))
     max_tokens_compile: int = field(default_factory=lambda: _int(os.getenv("MAX_TOKENS_COMPILE"), 8192))
 
     # database / auth
