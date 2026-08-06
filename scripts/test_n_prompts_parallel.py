@@ -10,7 +10,7 @@ from types import SimpleNamespace
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import backend.services.prepare as prepare_module
-from backend.services.prepare import _generate_n_prompts_parallel, _n_prompts
+from backend.services.prepare import _generate_n_prompts_parallel, _gpt55_single_node, _merge_single_node_identity, _n_prompts
 from backend.services.prepare import _prompt_item
 
 
@@ -37,6 +37,8 @@ def main() -> None:
     test_parallel_slot_generation()
     test_parallel_failure_falls_back_to_single_call()
     test_prompt_item_front_loads_shopee_ad_style_and_visible_copy()
+    test_prompt_item_can_skip_legacy_front_load()
+    test_gpt55_single_node_uses_one_apimart_call()
     print("PASS: split-slot N2 prompt writer")
 
 
@@ -128,6 +130,88 @@ def test_prompt_item_front_loads_shopee_ad_style_and_visible_copy() -> None:
     assert "target_language_copy field" not in prompt["final"]
     assert "HOT SALE" in prompt["final"]
     assert "ส่งฟรี" in prompt["final"]
+
+
+def test_prompt_item_can_skip_legacy_front_load() -> None:
+    parsed = _prompt_item(
+        {
+            "slot": 1,
+            "zh": "按玩具品类做柔和可爱风。",
+            "target_language_copy": "นุ่มน่ากอด",
+            "final": "IDENTITY: plush toy. TEXT RENDERING: target_language_copy field.",
+        },
+        front_load=False,
+    )
+    assert parsed is not None
+    _, prompt = parsed
+    assert not prompt["final"].startswith("Create a high-CTR Shopee Southeast Asia marketplace advertising poster")
+    assert "red/yellow/black" not in prompt["final"]
+    assert "นุ่มน่ากอด" in prompt["final"]
+
+
+def test_gpt55_single_node_uses_one_apimart_call() -> None:
+    class FakeAPIMart:
+        def __init__(self) -> None:
+            self.calls: list[dict] = []
+
+        def complete_json(self, system: str, user: str, **kwargs):
+            self.calls.append({"system": system, "user": user, "kwargs": kwargs})
+            return {
+                "json": {
+                    "identity": {
+                        "product_name": "黄色毛绒玩具",
+                        "category": "玩具",
+                        "observed_identity": "黄色毛绒材质，圆形黑眼睛",
+                        "reference_quality": 90,
+                    },
+                    "identity_lock": "主商品 黄色毛绒玩具：黄色毛绒材质、圆形黑眼睛与参考图一致。",
+                    "style_brief": "柔和明亮的可爱玩具广告风格",
+                    "prompts": [
+                        {
+                            "slot": 1,
+                            "zh": "主图采用柔和可爱风，不使用强促销红黄爆炸背景。",
+                            "final": "IDENTITY: yellow plush toy. COMPOSITION: soft playful retail poster.",
+                            "target_language_copy": "ของเล่นนุ่ม",
+                        },
+                        {
+                            "slot": 2,
+                            "zh": "核心卖点突出柔软触感。",
+                            "final": "IDENTITY: yellow plush toy. COMPOSITION: cozy touch close-up.",
+                            "target_language_copy": "สัมผัสนุ่ม",
+                        },
+                    ],
+                }
+            }
+
+    fake_client = FakeAPIMart()
+    original_client = prepare_module.APIMartClient
+    prepare_module.APIMartClient = lambda: fake_client
+    try:
+        slots = [
+            SimpleNamespace(order=1, name="Shopee high-CTR main poster", id="slot-1"),
+            SimpleNamespace(order=2, name="Key benefit", id="slot-2"),
+        ]
+        cluster = SimpleNamespace(
+            name="",
+            product_name="",
+            product_facts="",
+            identity_lock="",
+            analysis_snapshot={},
+            cluster_assets=[],
+            batch=SimpleNamespace(output_template=SimpleNamespace(slots=slots), global_prompt=""),
+        )
+        style_brief, prompts, node = _gpt55_single_node(None, cluster, "TH")
+        _merge_single_node_identity(cluster, node)
+    finally:
+        prepare_module.APIMartClient = original_client
+
+    assert len(fake_client.calls) == 1
+    assert style_brief == "柔和明亮的可爱玩具广告风格"
+    assert sorted(prompts) == [1, 2]
+    assert "red/yellow/black" not in prompts[1]["final"]
+    assert cluster.product_name == "黄色毛绒玩具"
+    assert cluster.product_facts.startswith("黄色毛绒材质")
+    assert cluster.identity_lock.startswith("主商品 黄色毛绒玩具")
 
 
 if __name__ == "__main__":

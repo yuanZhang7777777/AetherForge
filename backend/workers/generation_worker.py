@@ -42,6 +42,10 @@ _NORMALIZED = {
 }
 
 
+def _prompt_json_client():
+    return DeepSeekClient() if settings.deepseek_enabled else APIMartClient()
+
+
 def _now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -128,7 +132,7 @@ def _poll_task(client: APIMartClient, task_id: str) -> dict:
 
 def _simplify_prompt(db: Session, gen: Generation) -> bool:
     try:
-        result = DeepSeekClient().complete_json(
+        result = _prompt_json_client().complete_json(
             n5_simplify_prompt(),
             gen.prompt_text,
             reasoning_effort="low",
@@ -153,7 +157,7 @@ def _retranslate(db: Session, gen: Generation) -> bool:
     """用户改过中文策划：按最新中文重译出最终英文 final，覆盖本次提交用，不落库。"""
     snapshot = gen.rule_snapshot or {}
     try:
-        result = DeepSeekClient().complete_json(
+        result = _prompt_json_client().complete_json(
             retranslate_final_prompt(snapshot.get("site") or ""),
             retranslate_final_user(
                 str(snapshot.get("zh") or ""),

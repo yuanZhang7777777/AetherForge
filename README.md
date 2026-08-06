@@ -7,8 +7,8 @@
 1. ERP 或本地账号登录，前端通过 `/api/csrf/` 获取 CSRF token。
 2. 创建项目，选择平台、国家、图片比例、分辨率和项目风格提示词。
 3. 导入图片/文件夹或 ERP SKU；SKU 导入会用当前登录会话里的 ERP token 拉商品名和图片。
-4. 预备生成：N1 可选视觉识别，N2 先生成 Shopee 东南亚高 CTR 广告风格 `style_brief`，再按槽位并行生成 9 张图的中文策划和英文出图 prompt；落库前会把 Shopee 广告任务前置并嵌入真实可见文案，N3 写入 READY 快照。
-5. 正式生成：generation-worker 用 gpt-image-2 生图，用户改过中文策划的槽位会在提交前轻量重译英文 prompt。
+4. 预备生成：默认 legacy 链路保留 N1 可选视觉识别 + N2 分槽提示词；生产可切 `PROMPT_PIPELINE_MODE=gpt55_single`，用 APIMart GPT-5.5 单节点一次完成识别、身份锁、`style_brief` 和 9 张图提示词。
+5. 正式生成：generation-worker 用 gpt-image-2 生图，用户改过中文策划的槽位会在提交前轻量重译英文 prompt；`DEEPSEEK_ENABLED=0` 时轻量文本 JSON 调用走 APIMart prompt 模型。
 6. 结果页查看、双击放大、选择图片导出 ZIP；导出只包含当前项目 owner 的 completed 结果。
 
 ## 本地运行
@@ -44,12 +44,14 @@ docker compose up -d
 
 ## 关键环境变量
 
+- `PROMPT_PIPELINE_MODE=legacy|gpt55_single`：`gpt55_single` 用 APIMart GPT-5.5 一次完成识别+提示词。
+- `DEEPSEEK_ENABLED=1|0`：关闭后不再调用 DeepSeek，文本 JSON 兜底走 APIMart。
 - `DEEPSEEK_API_KEY` / `DEEPSEEK_BASE_URL` / `DEEPSEEK_PROMPT_MODEL`
 - `REASONING_EFFORT_PROMPTS=low`：N2 分槽提示词生成档位。
 - `REASONING_EFFORT_DEEP=high`：N2 并行失败后旧单次兜底路径使用。
 - `MAX_TOKENS_PROMPTS=49152`：旧单次 9 槽兜底输出空间。
 - `MAX_TOKENS_COMPILE=8192`：单槽提示词和生成前重译使用。
-- `APIMART_API_KEY` / `APIMART_IMAGE_MODEL`
+- `APIMART_API_KEY` / `APIMART_PROMPT_MODEL` / `APIMART_IMAGE_MODEL`
 - `ERP_LOGIN_URL` / `PLATFORM_ADMIN_ERP_USERS`
 - `CATALOG_QUERY_URL` / `CATALOG_ALLOWED_IMAGE_HOSTS`
 - `DATABASE_URL` / `POSTGRES_PASSWORD`

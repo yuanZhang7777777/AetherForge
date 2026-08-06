@@ -32,6 +32,7 @@ def _float(value: str | None, default: float) -> float:
 @dataclass(frozen=True)
 class Settings:
     # DeepSeek
+    deepseek_enabled: bool = field(default_factory=lambda: _bool(os.getenv("DEEPSEEK_ENABLED"), True))
     deepseek_api_key: str = field(default_factory=lambda: os.getenv("DEEPSEEK_API_KEY", ""))
     deepseek_base_url: str = field(default_factory=lambda: os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com").rstrip("/"))
     deepseek_prompt_model: str = field(default_factory=lambda: os.getenv("DEEPSEEK_PROMPT_MODEL", "deepseek-v4-flash"))
@@ -41,6 +42,8 @@ class Settings:
     apimart_api_key: str = field(default_factory=lambda: os.getenv("APIMART_API_KEY", ""))
     apimart_base_url: str = field(default_factory=lambda: os.getenv("APIMART_BASE_URL", "https://api.apimart.ai/v1").rstrip("/"))
     apimart_vision_model: str = field(default_factory=lambda: os.getenv("APIMART_VISION_MODEL", "gpt-5-nano-2025-08-07"))
+    apimart_prompt_model: str = field(default_factory=lambda: os.getenv("APIMART_PROMPT_MODEL", "gpt-5.5"))
+    apimart_prompt_max_output_tokens: int = field(default_factory=lambda: _int(os.getenv("APIMART_PROMPT_MAX_OUTPUT_TOKENS"), 24000))
     apimart_image_model: str = field(default_factory=lambda: os.getenv("APIMART_IMAGE_MODEL", "gpt-image-2"))
 
     # OSS
@@ -70,6 +73,7 @@ class Settings:
 
     # runtime
     offline_mode: bool = field(default_factory=lambda: _bool(os.getenv("OFFLINE_MODE"), False))
+    prompt_pipeline_mode: str = field(default_factory=lambda: os.getenv("PROMPT_PIPELINE_MODE", "legacy").strip().lower())
     prompt_timeout_seconds: int = field(default_factory=lambda: _int(os.getenv("PROMPT_TIMEOUT_SECONDS"), 180))
     reasoning_effort_deep: str = field(default_factory=lambda: os.getenv("REASONING_EFFORT_DEEP", "high"))
     reasoning_effort_prompts: str = field(default_factory=lambda: os.getenv("REASONING_EFFORT_PROMPTS", "low"))
@@ -104,6 +108,9 @@ class Settings:
 
     @property
     def has_credentials(self) -> bool:
+        prompt_uses_apimart = self.prompt_pipeline_mode in {"gpt55_single", "apimart_single"} or not self.deepseek_enabled
+        if prompt_uses_apimart:
+            return bool(self.apimart_api_key)
         return bool(self.deepseek_api_key and self.apimart_api_key)
 
 

@@ -9,6 +9,7 @@ N3 确定性校验 → READY + fingerprint。
 from __future__ import annotations
 
 import uuid
+from contextlib import ExitStack
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from sqlalchemy.orm import Session
@@ -17,6 +18,8 @@ from ..config import settings
 from ..models import Cluster
 from ..prompts import (
     n1_observe_instruction,
+    n_prepare_single_gpt55_system,
+    n_prepare_single_gpt55_user,
     n_prompts_slot_system,
     n_prompts_slot_user,
     n_prompts_style_brief_system,
@@ -85,6 +88,10 @@ def _prepare(db: Session, cluster: Cluster, actor_id) -> None:
     analysis["_preparation_site"] = frozen_site
     cluster.analysis_snapshot = analysis
 
+    if settings.prompt_pipeline_mode in {"gpt55_single", "apimart_single"}:
+        _prepare_single_gpt55(db, cluster, frozen_site, actor_id)
+        return
+
     # 名称+补充信息都填全 → 跳过 N1 视觉识别（省一次 APIMart 调用，不覆盖用户填写）；
     # 只缺一项才跑 N1，_merge_recognition 按字段独立只补缺项，永不覆盖用户填写。
     if cluster.batch.ai_recognition_enabled and not (
@@ -105,6 +112,30 @@ def _prepare(db: Session, cluster: Cluster, actor_id) -> None:
     created = persist_prompts_direct(db, cluster, prompts, style_brief, actor_id=actor_id)
     if not created:
         raise PreparationFailed("没有可生成的营销槽位")
+
+    _set_stage(db, cluster, "N3", 3)
+    _n3_readiness(db, cluster)
+
+
+def _prepare_single_gpt55(db: Session, cluster: Cluster, site: str, actor_id) -> None:
+    """单节点 prepare：GPT-5.5 一次看图并输出 identity/style/prompts。"""
+    _set_stage(db, cluster, "N2", 2)
+    style_brief, prompts, node = _gpt55_single_node(db, cluster, site)
+    _merge_single_node_identity(cluster, node)
+    _n3_fact_ledger(cluster)
+
+    analysis = dict(cluster.analysis_snapshot or {})
+    analysis["marketing_plan"] = {
+        "plans": [],
+        "style_brief": style_brief,
+        "mode": settings.prompt_pipeline_mode,
+        "model": settings.apimart_prompt_model,
+    }
+    cluster.analysis_snapshot = analysis
+
+    created = persist_prompts_direct(db, cluster, prompts, style_brief, actor_id=actor_id)
+    if not created:
+        raise PreparationFailed("GPT-5.5 未返回可生成的营销槽位")
 
     _set_stage(db, cluster, "N3", 3)
     _n3_readiness(db, cluster)
@@ -365,7 +396,100 @@ def _generate_n_prompts_parallel(
     return style_brief, prompts
 
 
-def _prompt_item(item, expected_slot: int | None = None) -> tuple[int, dict] | None:
+def _gpt55_single_node(db: Session, cluster: Cluster, site: str) -> tuple[str, dict[int, dict], dict]:
+    template = cluster.batch.output_template or global_fallback_template(db)
+    slots = [
+        {"order": s.order, "name": s.name}
+        for s in template_slots(template)
+        if s.name != "Seller original product photo"
+    ]
+    product_name = (cluster.product_name or cluster.name or "").strip()
+    facts = _facts(cluster)
+    person_policy = _person_policy(cluster)
+    client = APIMartClient()
+    with ExitStack() as stack:
+        image_sources: list[str] = []
+        for item in cluster.cluster_assets:
+            if item.asset.kind != "image":
+                continue
+            try:
+                local = stack.enter_context(get_storage().local_path(item.asset.storage_path))
+                image_sources.append(str(local))
+            except Exception:
+                continue
+        result = client.complete_json(
+            n_prepare_single_gpt55_system(site),
+            n_prepare_single_gpt55_user(
+                product_name,
+                facts,
+                site,
+                person_policy,
+                slots,
+            ),
+            image_sources=image_sources,
+            max_tokens=settings.apimart_prompt_max_output_tokens,
+        )
+    node = result["json"]
+    if not isinstance(node, dict):
+        raise PreparationFailed("GPT-5.5 单节点未返回 JSON 对象")
+    style_brief = str(node.get("style_brief") or "").strip()
+    raw = node.get("prompts")
+    if not style_brief or not isinstance(raw, list):
+        raise PreparationFailed("GPT-5.5 单节点缺少 style_brief 或 prompts")
+    prompts: dict[int, dict] = {}
+    for item in raw:
+        parsed = _prompt_item(item, front_load=False)
+        if parsed is None:
+            continue
+        slot, prompt = parsed
+        prompts[slot] = prompt
+    missing = [s["order"] for s in slots if s["order"] not in prompts]
+    if missing:
+        raise PreparationFailed(f"GPT-5.5 单节点缺少槽位：{', '.join(map(str, missing))}")
+    return style_brief, prompts, node
+
+
+def _merge_single_node_identity(cluster: Cluster, node: dict) -> None:
+    analysis = dict(cluster.analysis_snapshot or {})
+    raw_identity = node.get("identity") if isinstance(node.get("identity"), dict) else {}
+    identity = dict(analysis.get("identity") or {})
+    identity.update(
+        {
+            "product_name": str(raw_identity.get("product_name") or identity.get("product_name") or ""),
+            "observed_identity": str(raw_identity.get("observed_identity") or identity.get("observed_identity") or ""),
+            "reference_quality": int(raw_identity.get("reference_quality") or identity.get("reference_quality") or 0),
+            "product_profile": {
+                **dict(identity.get("product_profile") or {}),
+                "category": str(raw_identity.get("category") or ""),
+                "primary_appearance": str(raw_identity.get("observed_identity") or ""),
+            },
+        }
+    )
+    recognized_name = _clean_product_name(identity.get("product_name"))
+    recognized_identity = str(identity.get("observed_identity") or "").strip()
+    if not (cluster.product_name or "").strip() and recognized_name:
+        cluster.product_name = recognized_name
+        analysis["product_name"] = recognized_name
+        analysis["product_name_source"] = "ai"
+    elif (cluster.product_name or "").strip():
+        identity["product_name"] = cluster.product_name
+        analysis["product_name_source"] = "manual"
+
+    if not (cluster.product_facts or "").strip() and recognized_identity:
+        cluster.product_facts = recognized_identity[:2000]
+        analysis["product_facts_source"] = "recognition"
+    elif (cluster.product_facts or "").strip() and recognized_identity:
+        identity["recognition_note"] = recognized_identity[:800]
+
+    cluster.identity_lock = str(node.get("identity_lock") or "").strip()[:2000]
+    if not cluster.identity_lock:
+        _n2_identity_lock(None, cluster)
+    analysis["identity"] = identity
+    analysis["prompt_pipeline_mode"] = settings.prompt_pipeline_mode
+    cluster.analysis_snapshot = analysis
+
+
+def _prompt_item(item, expected_slot: int | None = None, *, front_load: bool = True) -> tuple[int, dict] | None:
     if not isinstance(item, dict):
         return None
     try:
@@ -379,13 +503,13 @@ def _prompt_item(item, expected_slot: int | None = None) -> tuple[int, dict] | N
         return None
     target_copy = str(item.get("target_language_copy") or "").strip()
     return slot, {
-        "final": _front_load_shopee_prompt(final, target_copy),
+        "final": _front_load_shopee_prompt(final, target_copy) if front_load else _ensure_visible_copy(final, target_copy),
         "zh": str(item.get("zh") or "").strip(),
         "target_language_copy": target_copy,
     }
 
 
-def _front_load_shopee_prompt(final: str, target_copy: str) -> str:
+def _ensure_visible_copy(final: str, target_copy: str) -> str:
     text = final.strip()
     if target_copy:
         text = text.replace(
@@ -396,9 +520,14 @@ def _front_load_shopee_prompt(final: str, target_copy: str) -> str:
         text = text.replace("target_language_copy", "visible text block")
         if target_copy not in text:
             text += (
-                "\nVISIBLE TEXT: Render exactly these lines, each line once, with bold high-contrast typography:\n"
+                "\nVISIBLE TEXT: Render exactly these lines, each line once, with readable typography:\n"
                 + target_copy
             )
+    return text
+
+
+def _front_load_shopee_prompt(final: str, target_copy: str) -> str:
+    text = _ensure_visible_copy(final, target_copy)
     if not text.startswith(_SHOPEE_AD_PREFIX):
         text = _SHOPEE_AD_PREFIX + "\n" + text
     return text

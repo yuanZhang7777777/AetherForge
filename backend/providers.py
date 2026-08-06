@@ -70,6 +70,8 @@ class DeepSeekClient:
         temperature: float | None = None,
         thinking: bool = True,
     ) -> dict[str, Any]:
+        if not settings.deepseek_enabled:
+            raise ProviderError("DeepSeek 文本模型已关闭")
         if not self.api_key:
             raise ProviderError("缺少 DEEPSEEK_API_KEY")
         payload: dict[str, Any] = {
@@ -199,6 +201,46 @@ class APIMartClient:
         if resp.status_code >= 400:
             raise ProviderError(sanitize(f"视觉识别失败 {resp.status_code}: {body}"))
         return self._responses_output_text(body)
+
+    def complete_json(
+        self,
+        system: str,
+        user: str,
+        *,
+        model: str | None = None,
+        image_sources: list[str | Path] | None = None,
+        max_tokens: int | None = None,
+        reasoning_effort: str | None = None,
+        temperature: float | None = None,
+        thinking: bool = True,
+    ) -> dict[str, Any]:
+        """APIMart Responses JSON 调用；参数签名兼容 DeepSeekClient。"""
+        if not self.api_key:
+            raise ProviderError("缺少 APIMART_API_KEY")
+        urls = [self.to_image_url(src) for src in image_sources or []]
+        content: list[dict[str, Any]] = [
+            {"type": "input_text", "text": f"SYSTEM:\n{system}\n\nUSER:\n{user}"}
+        ]
+        content.extend({"type": "input_image", "image_url": url} for url in urls)
+        payload: dict[str, Any] = {
+            "model": model or settings.apimart_prompt_model,
+            "input": [{"role": "user", "content": content}],
+        }
+        if max_tokens:
+            payload["max_output_tokens"] = max_tokens
+        resp = requests.post(
+            self._url("/v1/responses"),
+            json=payload,
+            headers=self._headers(),
+            timeout=self.timeout,
+        )
+        body = resp.json()
+        if resp.status_code >= 400:
+            raise ProviderError(sanitize(f"APIMart 文本模型返回 {resp.status_code}: {body}"))
+        text = self._responses_output_text(body)
+        if not text:
+            raise ProviderError("APIMart 文本模型返回空内容")
+        return {"json": extract_json(text), "raw_text": text}
 
     def submit_generation(self, prompt: str, image_urls: list[str], size: str, resolution: str) -> str:
         """提交生图任务，返回 task_id。参考图通过 image_urls 传入（gpt-image-2）。"""
