@@ -10,6 +10,7 @@ from types import SimpleNamespace
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import backend.services.prepare as prepare_module
+from backend.prompts import n_prepare_single_gpt55_system
 from backend.services.prepare import _generate_n_prompts_parallel, _gpt55_single_node, _merge_single_node_identity, _n_prompts
 from backend.services.prepare import _prompt_item
 
@@ -38,6 +39,7 @@ def main() -> None:
     test_parallel_failure_falls_back_to_single_call()
     test_prompt_item_front_loads_shopee_ad_style_and_visible_copy()
     test_prompt_item_can_skip_legacy_front_load()
+    test_gpt55_system_prompt_is_neutral_designer_node()
     test_gpt55_single_node_uses_one_apimart_call()
     print("PASS: split-slot N2 prompt writer")
 
@@ -147,6 +149,15 @@ def test_prompt_item_can_skip_legacy_front_load() -> None:
     assert not prompt["final"].startswith("Create a high-CTR Shopee Southeast Asia marketplace advertising poster")
     assert "red/yellow/black" not in prompt["final"]
     assert "นุ่มน่ากอด" in prompt["final"]
+
+
+def test_gpt55_system_prompt_is_neutral_designer_node() -> None:
+    text = n_prepare_single_gpt55_system("TH")
+    assert "图片设计师" in text
+    assert "1–4" not in text
+    assert "1-4" not in text
+    for phrase in ("不要套用固定红黄大促模板", "不要复制任何示例图配色", "高大促", "强红黄背景"):
+        assert phrase not in text
 
 
 def test_gpt55_single_node_uses_one_apimart_call() -> None:
