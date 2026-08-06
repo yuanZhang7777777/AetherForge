@@ -18,6 +18,7 @@ from .routers import assets as assets_router
 from .routers import auth as auth_router
 from .routers import clusters as clusters_router
 from .routers import generations as generations_router
+from .routers import prompt_templates as prompt_templates_router
 from .routers import projects as projects_router
 from .routers import workspace as workspace_router
 
@@ -54,6 +55,7 @@ def health() -> dict:
 app.include_router(auth_router.router)
 app.include_router(workspace_router.router)
 app.include_router(projects_router.router)
+app.include_router(prompt_templates_router.router)
 app.include_router(clusters_router.router)
 app.include_router(assets_router.router)
 app.include_router(generations_router.router)

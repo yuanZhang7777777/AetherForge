@@ -1,4 +1,4 @@
-"""真实 DeepSeek 验证三节点「写提示词」节点：一次调用产出 9 张 中文策划(zh) + 最终英文提示词(final) + 当地语文案。
+"""真实 DeepSeek 验证三节点「写提示词」节点：style brief + 分槽并行产出 9 张提示词。
 
 断言：
 1. prompts 长度 = 9，slot 覆盖 1–9。
@@ -11,11 +11,13 @@
 """
 import sys
 import re
+from pathlib import Path
 
-sys.path.insert(0, r"e:\Project\AetherForge")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from backend.prompts import n_prompts_system, n_prompts_user, n4_person_policy
+from backend.prompts import n4_person_policy
 from backend.providers import DeepSeekClient
+from backend.services.prepare import _generate_n_prompts_parallel
 
 SITE = "TH"
 PRODUCT_NAME = "智能电饭煲"
@@ -46,26 +48,20 @@ print("person_policy:", person_policy)
 print("=" * 60)
 
 client = DeepSeekClient()
-result = client.complete_json(
-    n_prompts_system(SITE),
-    n_prompts_user(PRODUCT_NAME, IDENTITY_LOCK, FACTS, SITE, person_policy, SLOTS),
-    reasoning_effort="high",
-    max_tokens=49152,
-    thinking=True,
+style_brief, prompt_map = _generate_n_prompts_parallel(
+    client,
+    product_name=PRODUCT_NAME,
+    identity_lock=IDENTITY_LOCK,
+    facts=FACTS,
+    site=SITE,
+    person_policy=person_policy,
+    slots=SLOTS,
 )
-node = result["json"]
-assert isinstance(node, dict), f"返回不是 JSON 对象：{type(node)}"
+assert len(prompt_map) == 9, f"prompts 应为 9 张，实际 {len(prompt_map)}"
+assert set(prompt_map) == set(range(1, 10)), f"slot 应覆盖 1–9，实际 {sorted(prompt_map)}"
 
-style_brief = str(node.get("style_brief") or "").strip()
-prompts = node.get("prompts")
-assert isinstance(prompts, list), "缺少 prompts 数组"
-assert len(prompts) == 9, f"prompts 应为 9 张，实际 {len(prompts)}"
-
-by_slot = {int(item["slot"]): item for item in prompts if isinstance(item, dict) and item.get("slot")}
-assert set(by_slot) == set(range(1, 10)), f"slot 应覆盖 1–9，实际 {sorted(by_slot)}"
-
-finals = {slot: str(item.get("final") or item.get("prompt") or "").strip() for slot, item in by_slot.items()}
-zhs = {slot: str(item.get("zh") or "").strip() for slot, item in by_slot.items()}
+finals = {slot: str(item.get("final") or "").strip() for slot, item in prompt_map.items()}
+zhs = {slot: str(item.get("zh") or "").strip() for slot, item in prompt_map.items()}
 
 # 1. style_brief 非空
 assert style_brief, "style_brief 为空"

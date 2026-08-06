@@ -33,6 +33,22 @@ class ProductConfiguration(BaseModel):
     ai_recognition_enabled: bool = False
 
 
+class PromptTemplateCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=80)
+    content: str = Field(..., min_length=1)
+
+
+class PromptTemplateItem(BaseModel):
+    id: str
+    name: str
+    content: str
+    updatedAt: str
+
+
+class PromptTemplateList(BaseModel):
+    templates: list[PromptTemplateItem] = Field(default_factory=list)
+
+
 # ---------------------------------------------------------------- 资产
 class ProductAsset(BaseModel):
     id: str

@@ -1,5 +1,5 @@
 import { developmentWorkspace } from "./mock-data";
-import type { ClusterUpdateInput, ClusterUpdateResult, CurrentUser, ImportMode, PreflightResult, ProductConfiguration, Project, ProjectInput, ProjectProgress, PromptNodeDraftInput, PromptNodeTemplate, ReviewInput, RevisionInput, SkuImportResult, WorkspaceSnapshot } from "./types";
+import type { ClusterUpdateInput, ClusterUpdateResult, CurrentUser, ImportMode, PreflightResult, ProductConfiguration, Project, ProjectInput, ProjectProgress, PromptNodeDraftInput, PromptNodeTemplate, PromptTemplate, ReviewInput, RevisionInput, SkuImportResult, WorkspaceSnapshot } from "./types";
 
 export class ApiError extends Error {
   constructor(public status: number, message: string, public authRequired = false) {
@@ -160,6 +160,21 @@ export function updateProjectSettings(projectId: string, input: ProductConfigura
       ai_recognition_enabled: input.aiRecognitionEnabled ?? false,
     }),
   });
+}
+
+export function loadPromptTemplates() {
+  return jsonRequest<{ templates: PromptTemplate[] }>("/api/prompt-templates/");
+}
+
+export function savePromptTemplate(input: { name: string; content: string }) {
+  return jsonRequest<PromptTemplate>("/api/prompt-templates/", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export function deletePromptTemplate(templateId: string) {
+  return jsonRequest<{ status: "deleted" }>(`/api/prompt-templates/${templateId}/`, { method: "DELETE" });
 }
 
 export function prepareProject(projectId: string, clusterIds: string[]) {

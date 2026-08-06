@@ -72,6 +72,7 @@ class Settings:
     offline_mode: bool = field(default_factory=lambda: _bool(os.getenv("OFFLINE_MODE"), False))
     prompt_timeout_seconds: int = field(default_factory=lambda: _int(os.getenv("PROMPT_TIMEOUT_SECONDS"), 180))
     reasoning_effort_deep: str = field(default_factory=lambda: os.getenv("REASONING_EFFORT_DEEP", "high"))
+    reasoning_effort_prompts: str = field(default_factory=lambda: os.getenv("REASONING_EFFORT_PROMPTS", "low"))
     reasoning_effort_compile: str = field(default_factory=lambda: os.getenv("REASONING_EFFORT_COMPILE", "low"))
     deepseek_temperature: float = field(default_factory=lambda: _float(os.getenv("DEEPSEEK_TEMPERATURE"), 1.3))
     max_tokens_deep: int = field(default_factory=lambda: _int(os.getenv("MAX_TOKENS_DEEP"), 16384))

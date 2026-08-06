@@ -1,7 +1,7 @@
 """三节点 prepare 管线：识别 → 写提示词 → 就绪。
 
 N1 视觉识别（可选）：项目开启 ai_recognition_enabled 时运行，识别结果与用户填写对比融合，用户填的优先。
-N2 写提示词：一次 DeepSeek 调用（think 开）直接产出全部槽位的最终英文提示词 + 整套统一风格（style_brief）。
+N2 写提示词：先产出统一风格（style_brief），再按槽位并行产出最终英文提示词 + 中文策划；失败回退旧单次调用。
 N3 确定性校验 → READY + fingerprint。
 
 确定性步骤（不额外调模型）：identity_lock 身份锁、fact_ledger 事实台账。
@@ -9,12 +9,21 @@ N3 确定性校验 → READY + fingerprint。
 from __future__ import annotations
 
 import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..models import Cluster
-from ..prompts import n1_observe_instruction, n_prompts_system, n_prompts_user
+from ..prompts import (
+    n1_observe_instruction,
+    n_prompts_slot_system,
+    n_prompts_slot_user,
+    n_prompts_style_brief_system,
+    n_prompts_style_brief_user,
+    n_prompts_system,
+    n_prompts_user,
+)
 from ..providers import APIMartClient, DeepSeekClient, extract_json
 from ..storage import get_storage
 from .contract import preparation_fingerprint
@@ -223,7 +232,7 @@ def _n3_fact_ledger(cluster: Cluster) -> None:
     }
 
 
-# ---------------------------------------------------------------- N2 写提示词（一次 DeepSeek 调用）
+# ---------------------------------------------------------------- N2 写提示词（style_brief + 分槽并行，失败回退旧单次调用）
 def _n_prompts(db: Session, cluster: Cluster, site: str) -> tuple[str, dict[int, dict]]:
     template = cluster.batch.output_template or global_fallback_template(db)
     slots = [
@@ -232,14 +241,50 @@ def _n_prompts(db: Session, cluster: Cluster, site: str) -> tuple[str, dict[int,
         if s.name != "Seller original product photo"
     ]
     client = DeepSeekClient()
+    product_name = (cluster.product_name or cluster.name or "").strip()
+    identity_lock = (cluster.identity_lock or "").strip()
+    facts = _facts(cluster)
+    person_policy = _person_policy(cluster)
+    try:
+        return _generate_n_prompts_parallel(
+            client,
+            product_name=product_name,
+            identity_lock=identity_lock,
+            facts=facts,
+            site=site,
+            person_policy=person_policy,
+            slots=slots,
+        )
+    except Exception:
+        return _generate_n_prompts_single(
+            client,
+            product_name=product_name,
+            identity_lock=identity_lock,
+            facts=facts,
+            site=site,
+            person_policy=person_policy,
+            slots=slots,
+        )
+
+
+def _generate_n_prompts_single(
+    client: DeepSeekClient,
+    *,
+    product_name: str,
+    identity_lock: str,
+    facts: list[str],
+    site: str,
+    person_policy: str,
+    slots: list[dict],
+) -> tuple[str, dict[int, dict]]:
     result = client.complete_json(
         n_prompts_system(site),
         n_prompts_user(
-            (cluster.product_name or cluster.name or "").strip(),
-            (cluster.identity_lock or "").strip(),
-            _facts(cluster),
+            product_name,
+            identity_lock,
+            facts,
             site,
-            _person_policy(cluster),
+            person_policy,
             slots,
         ),
         reasoning_effort=settings.reasoning_effort_deep,
@@ -253,20 +298,84 @@ def _n_prompts(db: Session, cluster: Cluster, site: str) -> tuple[str, dict[int,
         raise PreparationFailed("写提示词未返回 prompts 数组")
     prompts: dict[int, dict] = {}
     for item in raw:
-        if not isinstance(item, dict):
+        parsed = _prompt_item(item)
+        if parsed is None:
             continue
-        try:
-            slot = int(item.get("slot") or 0)
-        except (TypeError, ValueError):
-            continue
-        final = str(item.get("final") or item.get("prompt") or "").strip()  # 兼容旧模型输出
-        if slot >= 1 and final:
-            prompts[slot] = {
-                "final": final,
-                "zh": str(item.get("zh") or "").strip(),
-                "target_language_copy": str(item.get("target_language_copy") or "").strip(),
-            }
+        slot, prompt = parsed
+        prompts[slot] = prompt
     return style_brief, prompts
+
+
+def _generate_n_prompts_parallel(
+    client: DeepSeekClient,
+    *,
+    product_name: str,
+    identity_lock: str,
+    facts: list[str],
+    site: str,
+    person_policy: str,
+    slots: list[dict],
+) -> tuple[str, dict[int, dict]]:
+    style_result = client.complete_json(
+        n_prompts_style_brief_system(site),
+        n_prompts_style_brief_user(product_name, identity_lock, facts, site, person_policy),
+        reasoning_effort=settings.reasoning_effort_prompts,
+        max_tokens=2048,
+        thinking=True,
+    )
+    style_node = style_result["json"]
+    style_brief = str(style_node.get("style_brief") or "").strip() if isinstance(style_node, dict) else ""
+    if not style_brief:
+        raise PreparationFailed("写提示词未返回 style_brief")
+
+    prompts: dict[int, dict] = {}
+
+    def build(slot: dict) -> tuple[int, dict]:
+        result = client.complete_json(
+            n_prompts_slot_system(site),
+            n_prompts_slot_user(
+                product_name=product_name,
+                identity_lock=identity_lock,
+                facts=facts,
+                site=site,
+                person_policy=person_policy,
+                style_brief=style_brief,
+                slot=slot,
+            ),
+            reasoning_effort=settings.reasoning_effort_prompts,
+            max_tokens=settings.max_tokens_compile,
+            thinking=True,
+        )
+        parsed = _prompt_item(result["json"], expected_slot=int(slot.get("order") or 0))
+        if parsed is None:
+            raise PreparationFailed(f"写提示词缺失槽位 {slot.get('order')}")
+        return parsed
+
+    with ThreadPoolExecutor(max_workers=max(1, min(len(slots), 6))) as executor:
+        futures = [executor.submit(build, slot) for slot in slots]
+        for future in as_completed(futures):
+            slot, prompt = future.result()
+            prompts[slot] = prompt
+    return style_brief, prompts
+
+
+def _prompt_item(item, expected_slot: int | None = None) -> tuple[int, dict] | None:
+    if not isinstance(item, dict):
+        return None
+    try:
+        slot = int(item.get("slot") or 0)
+    except (TypeError, ValueError):
+        return None
+    if expected_slot is not None and slot != expected_slot:
+        return None
+    final = str(item.get("final") or item.get("prompt") or "").strip()
+    if slot < 1 or not final:
+        return None
+    return slot, {
+        "final": final,
+        "zh": str(item.get("zh") or "").strip(),
+        "target_language_copy": str(item.get("target_language_copy") or "").strip(),
+    }
 
 
 # ---------------------------------------------------------------- N3 就绪

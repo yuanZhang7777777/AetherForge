@@ -1,15 +1,17 @@
-"""DB 级集成测试：persist_prompts_direct 在真实 9 槽模板上写英文 PromptVersion。
+"""DB 级集成测试：persist_prompts_direct 在真实 9 槽模板上写双语 PromptVersion。
 
 确定性路径（不调模型）：建 throwaway Batch+Cluster → persist_prompts_direct 写入
-{slot: 英文 prompt} → 断言 9 条、lang=en、display_prompt 空、node_name=prompt_writer、
+{slot: {final, zh, target_language_copy}} → 断言 9 条、lang=en、display_prompt=zh、node_name=prompt_writer、
 槽位覆盖 1-9 → 清理。
 
 在服务器容器内运行：docker exec aetherforge-prompt-worker python -m scripts.test_persist_direct
 """
 import sys
 import uuid
+from pathlib import Path
 
-sys.path.insert(0, r"/app")
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT if (ROOT / "backend").is_dir() else Path("/app")))
 
 from backend.db import SessionLocal
 from backend.models import Batch, Cluster, User
@@ -55,11 +57,15 @@ def main() -> None:
         db.flush()
 
         prompts = {
-            order: (
-                f"Create a polished 1:1 Shopee listing image for slot {order}. "
-                f"The reference product has exactly one main body, one liner and one lid; "
-                f'colors match the reference image. Show exact visible text: "พร้อมใช้" (slot {order}).'
-            )
+            order: {
+                "final": (
+                    f"Create a polished 1:1 Shopee listing image for slot {order}. "
+                    f"The reference product has exactly one main body, one liner and one lid; "
+                    f'colors match the reference image. Show exact visible text: "พร้อมใช้" (slot {order}).'
+                ),
+                "zh": f"槽位 {order} 中文策划：保持奶白机身，呈现真实使用场景。",
+                "target_language_copy": f"พร้อมใช้ slot {order}",
+            }
             for order in range(1, 10)
         }
         style_brief = "统一奶油白柔和影棚光，浅灰渐变背景，产品居中偏下微俯拍。"
@@ -74,15 +80,16 @@ def main() -> None:
         for order, pv in sorted(by_order.items()):
             assert pv.prompt_text.strip(), f"槽位 {order} prompt 为空"
             assert pv.node_name == "prompt_writer", f"槽位 {order} node_name={pv.node_name}"
-            assert pv.structured_output.get("node_output", {}).get("display_prompt") == "", (
-                f"槽位 {order} display_prompt 应为空"
+            assert pv.structured_output.get("node_output", {}).get("display_prompt") == prompts[order]["zh"], (
+                f"槽位 {order} display_prompt 应等于中文策划"
             )
+            assert pv.structured_output.get("target_language_copy") == prompts[order]["target_language_copy"]
             assert pv.output_slot.name == SLOT_NAMES.get(order, pv.output_slot.name)
 
-        print("PASS：9 条英文 PromptVersion")
+        print("PASS：9 条双语 PromptVersion")
         print(f"  模板槽数：{len(slots)}")
         print(f"  槽名：{', '.join(s.name for s in slots)}")
-        print(f"  槽位覆盖：{sorted(by_order)}；lang=en；display_prompt 空；node_name=prompt_writer")
+        print(f"  槽位覆盖：{sorted(by_order)}；lang=en；display_prompt=zh；node_name=prompt_writer")
 
         db.delete(cluster)
         db.flush()

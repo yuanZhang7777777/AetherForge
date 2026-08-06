@@ -327,7 +327,7 @@ def n5_simplify_prompt() -> str:
 
 # ---------------------------------------------------------------- 写提示词节点（三节点管线 N2）
 def n_prompts_system(site: str) -> str:
-    """一次 DeepSeek 调用，直接产出 9 张最终英文提示词 + 整套统一风格。
+    """旧兜底路径：一次 DeepSeek 调用直接产出 9 张最终英文提示词 + 整套统一风格。
 
     9 张图的结构（槽位名称与通用设计意图）内嵌在系统提示词中；具体场景/细节/文案由模型
     按商品真实卖点自行发挥，不在提示词中写死任何具体商品的例子。
@@ -418,6 +418,113 @@ def n_prompts_system(site: str) -> str:
         '"prompts": [每张一个对象：{"slot": 1到9的整数, "zh": "中文创作策划", "final": "最终英文生图提示词", '
         '"target_language_copy": "本张当地语文案"}]}。\n'
         "prompts 数组长度严格为 9，slot 覆盖 1–9，顺序与上面的 9 张固定结构一一对应。不要 Markdown、不要解释。"
+    )
+
+
+def n_prompts_style_brief_system(site: str) -> str:
+    local = SITES.get(site, {})
+    return (
+        "你是资深电商广告创意总监。请先为这款商品的一整套 9 张电商详情页图确定统一美术风格，"
+        "只输出 JSON。\n\n"
+        "# 9 张图的固定结构（顺序固定为 1–9）\n"
+        + _n_prompts_slots_text()
+        + "\n"
+        "# style_brief 要求\n"
+        "- 一句话中文写死整套风格：摄影风格、影调、主色调、光线语言、字体气质、整体情绪。\n"
+        "- 必须能约束后续 9 张图保持同一品牌 lookbook 观感，只换卖点焦点和场景内容，不换整体风格。\n"
+        "- 吸收用户补充信息里的风格要求；规格/材质/容量等事实不要改写成风格。\n\n"
+        + _site_rules(site, local)
+        + '\n\n只输出 JSON：{"style_brief": "整套统一美术风格（一句话，中文）"}'
+    )
+
+
+def n_prompts_style_brief_user(
+    product_name: str,
+    identity_lock: str,
+    points: list[str],
+    site: str,
+    person_policy: str,
+) -> str:
+    return "\n".join(
+        [
+            "请输出 style_brief。",
+            f"商品名称：{product_name}",
+            f"身份锁：{identity_lock}",
+            "商品补充信息："
+            + ("\n" + "\n".join(f"  - {p}" for p in points) if points else "(未提供)"),
+            f"站点：{site}",
+            f"人物策略：{person_policy}",
+        ]
+    )
+
+
+def n_prompts_slot_system(site: str) -> str:
+    local = SITES.get(site, {})
+    return (
+        "你是资深电商广告创意总监，同时是生图提示词作家。给定整套 style_brief 与一个固定槽位，"
+        "只为这一张图输出中文策划、最终英文生图提示词和当地语文案。只输出 JSON。\n\n"
+        "# 9 张图的固定结构（当前只生成 user 指定的一个槽位）\n"
+        + _n_prompts_slots_text()
+        + "\n"
+        "# 整套统一风格\n"
+        "- 必须服从 user 给出的 style_brief：摄影风格、影调、主色调、光线语言、字体气质、整体情绪保持一致。\n"
+        "- 只改变当前槽位的场景、卖点焦点与画面内容，不改变整体风格。\n\n"
+        "# 创意原则\n"
+        "- 当前图要有清晰创意概念，把真实卖点转成具体视觉隐喻或情绪场景，让观众直接感受到卖点。\n"
+        "- 禁止平庸模板：不要写成干净背景 + 商品居中 + 一行字，主图槽位除外；不要用『简洁大气』这类空洞词。\n"
+        "- 商品必须一眼可辨认，不能把单一部件特写到失去整体辨识度。\n"
+        "- 文字是设计的一部分，字体气质、大小、颜色、叠放方式要匹配场景情绪并清晰可读。\n\n"
+        "# 人物（如果出现真人）\n"
+        "- 做饭、清洁、收拾家务等日常场景不要默认女性；家庭/使用场景允许男性、女性、婴儿、小孩、老人自然出现。\n"
+        "- 婴儿/小孩出现时必须在安全位置，动作符合真实使用状态。\n\n"
+        "# 身份锁（商品本体不可变，每张都必须服从）\n"
+        + IDENTITY_LOCK_RULES
+        + "\n\n"
+        + _site_rules(site, local)
+        + "\n\n"
+        "# 商品补充信息的处理\n"
+        "- 用户补充信息可能混写风格、材质、尺寸/容量/重量、部件数量、卖点、使用场景。自行读懂并归类。\n"
+        "- 风格类已吸收进 style_brief；规格类必须如实使用，尤其尺寸材质图不得虚构或改数字；卖点/场景类用于当前槽位创意。\n\n"
+        "# final 必须是 5 段英文生图提示词\n"
+        "1. IDENTITY: 复述身份锁关键不变量，写死硬约束句 `The reference product has exactly N [component]`，"
+        "并加 `Keep exactly this verified component count and arrangement.`；不得虚构身份锁未给的外观细节。\n"
+        "2. REAL USE RELATIONSHIP: 若含人物，描述人物与商品的真实使用关系；否则跳过此段。\n"
+        "3. COMPOSITION: 英文描述景别、机位、角度、背景、场景、道具、光线、配色、质感；整套风格贯穿不变，商品完整可辨认。\n"
+        "4. TEXT RENDERING: 当前图的目标语言文案必须原样逐字嵌入，不得翻译、转写或改写；主图槽位不得加文字。"
+        "要求 typography 清晰、醒目、融入构图。\n"
+        "5. EMPHASIS: 强调卖点视觉化、本地风格、无乱码、无水印。\n\n"
+        "# zh 与 final 必须一一对应\n"
+        "- zh 是完整中文计划书：身份要点、创意场景、文案三部分，自包含，可供用户编辑。\n"
+        "- final 是 zh 的英文执行版，不得新增 zh 没写的画面元素；TEXT RENDERING 与 zh 文案逐字一致。\n"
+        "- target_language_copy 单独保存当前图的当地语文案；主图槽位为空。\n\n"
+        '只输出 JSON：{"slot": 槽位整数, "zh": "中文创作策划", '
+        '"final": "最终英文生图提示词", "target_language_copy": "本张当地语文案"}'
+    )
+
+
+def n_prompts_slot_user(
+    *,
+    product_name: str,
+    identity_lock: str,
+    facts: list[str],
+    site: str,
+    person_policy: str,
+    style_brief: str,
+    slot: dict,
+) -> str:
+    return "\n".join(
+        [
+            f"slot_order={slot.get('order')}",
+            f"slot_name={slot.get('name')}",
+            f"style_brief={style_brief}",
+            f"商品名称：{product_name}",
+            f"身份锁（商品本体必须服从）：{identity_lock}",
+            "商品补充信息："
+            + ("\n" + "\n".join(f"  - {p}" for p in facts) if facts else "(未提供)"),
+            f"站点：{site}",
+            f"人物策略：{person_policy}",
+            "请只输出这个槽位的 JSON，不要输出 prompts 数组。",
+        ]
     )
 
 

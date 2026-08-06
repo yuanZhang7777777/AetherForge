@@ -72,8 +72,9 @@ function renderApp(path = "/projects/project-1") {
   };
 }
 
-function stubFetch(options: { admin?: boolean; projectSnapshot?: typeof project; promptNodes?: Record<string, unknown>[] } = {}) {
+function stubFetch(options: { admin?: boolean; projectSnapshot?: typeof project; promptNodes?: Record<string, unknown>[]; promptTemplates?: Record<string, unknown>[] } = {}) {
   const currentProject = options.projectSnapshot ?? project;
+  const promptTemplates = options.promptTemplates ?? [];
   const promptNodes = options.promptNodes ?? [{
     id: "node-1",
     node_name: "N7.generic",
@@ -92,6 +93,8 @@ function stubFetch(options: { admin?: boolean; projectSnapshot?: typeof project;
     if (url.includes("/csrf/")) return response(200, { csrf_token: "csrf" });
     if (url === "/api/current-user/") return response(200, { role: options.admin ? "admin" : "operator" });
     if (url === "/api/workspace/snapshot/") return response(200, { currentUser: { role: options.admin ? "admin" : "operator" }, projects: [currentProject] });
+    if (url === "/api/prompt-templates/" && (!init?.method || init.method === "GET")) return response(200, { templates: promptTemplates });
+    if (url === "/api/prompt-templates/" && init?.method === "POST") return response(201, { id: "template-new", name: "新模板", content: "Ins 暖光", updatedAt: "2026-08-06T00:00:00Z" });
     if (url === "/api/admin/prompt-nodes/" && (!init?.method || init.method === "GET")) return options.admin ? response(200, { nodes: promptNodes }) : response(403, { error: "forbidden" });
     if (url === "/api/admin/prompt-nodes/" && init?.method === "POST") return response(201, promptNodes[0]);
     if (url === "/api/admin/prompt-nodes/publish/") return response(200, promptNodes[0]);
@@ -110,6 +113,33 @@ afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+});
+
+test("saves and applies the current user's project prompt templates", async () => {
+  const configuredProject: Project = {
+    ...project,
+    platform: "Shopee",
+    market: "SG",
+    defaultConfig: { ...project.defaultConfig, platform: "shopee", market: "SG", sellerTier: "general", size: "1:1", resolution: "1k", globalPrompt: "" },
+  };
+  const fetchMock = stubFetch({
+    projectSnapshot: configuredProject,
+    promptTemplates: [{ id: "template-1", name: "暖白模板", content: "暖白背景，真实家庭使用场景", updatedAt: "2026-08-06T00:00:00Z" }],
+  });
+  vi.spyOn(window, "prompt").mockReturnValue("Ins 暖光");
+  renderApp();
+
+  const style = await screen.findByLabelText("项目风格提示词");
+  fireEvent.change(style, { target: { value: "Ins 暖光，高饱和色块" } });
+  fireEvent.click(screen.getByRole("button", { name: "保存为常用模板" }));
+
+  await waitFor(() => expect(fetchMock.mock.calls.some(([url, init]) => String(url) === "/api/prompt-templates/" && init?.method === "POST")).toBe(true));
+  const saveCall = fetchMock.mock.calls.find(([url, init]) => String(url) === "/api/prompt-templates/" && init?.method === "POST");
+  expect(JSON.parse(String(saveCall?.[1]?.body))).toEqual({ name: "Ins 暖光", content: "Ins 暖光，高饱和色块" });
+
+  fireEvent.change(screen.getByLabelText("常用提示词模板"), { target: { value: "template-1" } });
+
+  await waitFor(() => expect(fetchMock.mock.calls.some(([url, init]) => String(url) === "/api/projects/project-1/settings/" && init?.method === "PATCH" && String(init.body).includes("暖白背景，真实家庭使用场景"))).toBe(true));
 });
 
 test("renders the compact toolbar with confirmed defaults and searchable extra markets", async () => {

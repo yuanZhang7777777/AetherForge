@@ -1,7 +1,4 @@
-"""每槽提示词：写提示词节点产出的最终英文提示词直接落 PromptVersion（lang=en），用户编辑同样直存英文。
-
-三节点管线下不再有中文中间层与英文化编译。
-"""
+"""每槽提示词：final 英文落 PromptVersion，zh 中文策划放 display_prompt 供用户编辑。"""
 from __future__ import annotations
 
 from sqlalchemy.orm import Session

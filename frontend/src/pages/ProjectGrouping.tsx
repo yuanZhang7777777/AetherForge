@@ -1,9 +1,9 @@
 import { DndContext, DragOverlay, KeyboardSensor, MeasuringStrategy, PointerSensor, useDroppable, useSensor, useSensors, type DragEndEvent, type DragStartEvent } from "@dnd-kit/core";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
 
-import { ApiError, deleteAsset, deleteCluster, generateProject, importSkus, mergeAsset, pauseProject, prepareProject, splitAsset, updateCluster, updateProjectSettings, uploadAssets, type UploadResult } from "../api";
+import { ApiError, deleteAsset, deleteCluster, deletePromptTemplate, generateProject, importSkus, loadPromptTemplates, mergeAsset, pauseProject, prepareProject, savePromptTemplate, splitAsset, updateCluster, updateProjectSettings, uploadAssets, type UploadResult } from "../api";
 import { ImportPanel } from "../components/ImportPanel";
 import { ProductCard } from "../components/ProductCard";
 import { commonMarkets, extraMarkets, platforms } from "../labels";
@@ -334,6 +334,17 @@ function ProductGrid({ children }: { children: ReactNode }) {
 }
 
 function ProjectToolbar({ project, pending, onSave }: { project: { id: string; name: string; defaultConfig?: ProductConfiguration; platform: string; market: string; size: string; resolution?: string }; pending: boolean; onSave: (input: ProductConfiguration) => Promise<unknown> }) {
+  const queryClient = useQueryClient();
+  const templateQuery = useQuery({ queryKey: ["prompt-templates"], queryFn: loadPromptTemplates });
+  const templates = templateQuery.data?.templates ?? [];
+  const saveTemplate = useMutation({
+    mutationFn: savePromptTemplate,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["prompt-templates"] }),
+  });
+  const removeTemplate = useMutation({
+    mutationFn: deletePromptTemplate,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["prompt-templates"] }),
+  });
   const allMarkets = [...commonMarkets, ...extraMarkets];
   const initial = () => ({
     platform: project.defaultConfig?.platform || project.platform?.toLowerCase() || "generic",
@@ -346,6 +357,7 @@ function ProjectToolbar({ project, pending, onSave }: { project: { id: string; n
   });
   const [draft, setDraft] = useState<ProductConfiguration>(initial);
   const [saved, setSaved] = useState<ProductConfiguration>(initial);
+  const [selectedTemplateId, setSelectedTemplateId] = useState("");
   const pendingSaved = useRef<string | null>(null);
   const dirty = JSON.stringify(draft) !== JSON.stringify(saved);
   useEffect(() => {
@@ -365,6 +377,19 @@ function ProjectToolbar({ project, pending, onSave }: { project: { id: string; n
       // The mutation error is rendered by the page; keep this draft dirty for retry.
     }
   };
+  const saveCurrentTemplate = () => {
+    const content = draft.globalPrompt.trim();
+    if (!content) return;
+    const name = window.prompt("模板名称", content.slice(0, 24));
+    if (!name?.trim()) return;
+    saveTemplate.mutate({ name: name.trim(), content });
+  };
+  const applyTemplate = (templateId: string) => {
+    setSelectedTemplateId(templateId);
+    const template = templates.find((item) => item.id === templateId);
+    if (!template) return;
+    void save({ ...draft, globalPrompt: template.content });
+  };
   return <section className="surface mb-3 p-2" aria-label="项目工具栏">
     <div className="flex flex-wrap items-end gap-2">
       <h1 className="mr-1 min-w-28 max-w-44 self-center truncate text-lg font-bold tracking-tight" title={project.name}>{project.name}</h1>
@@ -373,6 +398,9 @@ function ProjectToolbar({ project, pending, onSave }: { project: { id: string; n
       <label className="w-24 text-xs font-medium text-slate-500">比例<select aria-label="图片比例" className="mt-1" value={draft.size} onChange={(event) => void save({ ...draft, size: event.target.value })}><option value="1:1">1:1</option><option value="3:4">3:4</option></select></label>
       <label className="w-24 text-xs font-medium text-slate-500">分辨率<select aria-label="图片分辨率" className="mt-1" value={draft.resolution} onChange={(event) => void save({ ...draft, resolution: event.target.value })}><option value="1k">1K</option><option value="2k">2K</option></select></label>
       <label className="min-w-52 flex-1 text-xs font-medium text-slate-500">项目风格提示词<textarea aria-label="项目风格提示词" className="mt-1 min-h-9 max-h-24 resize-y py-1.5" value={draft.globalPrompt} placeholder="全项目默认提示词（选填）" onChange={(event) => setDraft({ ...draft, globalPrompt: event.target.value })} onBlur={() => { if (dirty) void save(draft); }} /></label>
+      <label className="w-44 text-xs font-medium text-slate-500">常用提示词模板<select aria-label="常用提示词模板" className="mt-1" value={selectedTemplateId} onChange={(event) => applyTemplate(event.target.value)}><option value="">选择模板</option>{templates.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+      <button className="secondary-button min-h-9 px-3" type="button" disabled={saveTemplate.isPending || !draft.globalPrompt.trim()} onClick={saveCurrentTemplate}>保存为常用模板</button>
+      <button className="toolbar-choice min-h-9 px-3" type="button" disabled={removeTemplate.isPending || !selectedTemplateId} onClick={() => selectedTemplateId && removeTemplate.mutate(selectedTemplateId)}>删除模板</button>
     </div>
   </section>;
 }

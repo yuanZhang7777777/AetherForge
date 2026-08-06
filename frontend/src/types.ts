@@ -135,6 +135,13 @@ export interface ProductConfiguration {
   aiRecognitionEnabled?: boolean;
 }
 
+export interface PromptTemplate {
+  id: string;
+  name: string;
+  content: string;
+  updatedAt?: string;
+}
+
 export interface ProductOverrides {
   platform: string | null;
   market: string | null;

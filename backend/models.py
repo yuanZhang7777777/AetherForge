@@ -81,6 +81,26 @@ class OutputSlot(Base):
     template: Mapped["OutputTemplate"] = relationship(back_populates="slots")
 
 
+class UserPromptTemplate(Base):
+    __tablename__ = "user_prompt_templates"
+    __table_args__ = (
+        UniqueConstraint("user_id", "name", name="unique_user_prompt_template_name"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    name: Mapped[str] = mapped_column(String(80))
+    content: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, onupdate=_now
+    )
+
+    user: Mapped["User"] = relationship()
+
+
 class Batch(Base):
     __tablename__ = "batches"
 
