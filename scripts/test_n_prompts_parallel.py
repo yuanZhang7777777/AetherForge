@@ -156,7 +156,16 @@ def test_gpt55_system_prompt_is_neutral_designer_node() -> None:
     assert "图片设计师" in text
     assert "1–4" not in text
     assert "1-4" not in text
-    for phrase in ("不要套用固定红黄大促模板", "不要复制任何示例图配色", "高大促", "强红黄背景"):
+    for phrase in (
+        "不要套用固定红黄大促模板",
+        "不要复制任何示例图配色",
+        "高大促",
+        "强红黄背景",
+        "主体占画面",
+        "产品完整清晰",
+        "促销或信任元素",
+        "递进演示使用或安装步骤，顺序清晰",
+    ):
         assert phrase not in text
 
 
