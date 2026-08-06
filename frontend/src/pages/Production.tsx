@@ -32,7 +32,7 @@ export default function Production() {
                   <td>{done} / {total || "—"}</td>
                   <td>{active}</td>
                   <td>{failed}</td>
-                  <td><Link className="text-sm font-semibold text-blue-700" to={`/projects/${project.id}/results`}>查看结果</Link></td>
+                  <td><Link className="text-sm font-semibold text-indigo-700" to={`/projects/${project.id}/results`}>查看结果</Link></td>
                 </tr>
               ))}
             </tbody>

@@ -1,4 +1,4 @@
-import { DndContext, KeyboardSensor, PointerSensor, useDroppable, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
+import { DndContext, DragOverlay, KeyboardSensor, MeasuringStrategy, PointerSensor, useDroppable, useSensor, useSensors, type DragEndEvent, type DragStartEvent } from "@dnd-kit/core";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
@@ -49,11 +49,12 @@ export default function ProjectGrouping() {
   const project = projectQuery.data;
   const needsCountry = Boolean(project && (!project.market || project.market === "SEA"));
   const [countryDraft, setCountryDraft] = useState<string>(REAL_MARKETS[0]?.[0] ?? "TH");
+  const [activeDrag, setActiveDrag] = useState<ProductAsset | null>(null);
   const selectedClusters = useMemo(() => project?.skus.filter((sku) => !deselectedIds.has(sku.id)) ?? [], [project, deselectedIds]);
   const selectedPreparing = selectedClusters.some(skuHasActivePreparation);
   const selectedGenerating = selectedClusters.some(skuHasActiveGeneration);
   const selectedActiveWork = selectedPreparing || selectedGenerating;
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }), useSensor(KeyboardSensor));
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }), useSensor(KeyboardSensor));
   const invalidate = async () => {
     await queryClient.invalidateQueries({ queryKey: ["project", projectId] });
     await queryClient.invalidateQueries({ queryKey: ["workspace"] });
@@ -256,8 +257,16 @@ export default function ProjectGrouping() {
         expandedPointerStartedInside.current = false;
         return;
       }
-      event.preventDefault();
-      event.stopPropagation();
+      // 点击另一张商品卡（详情/选择等）→ 吞掉点击并关闭当前卡，避免误切到另一张卡
+      if (target.closest('[role="group"]')) {
+        event.preventDefault();
+        event.stopPropagation();
+        setExpandedId(null);
+        return;
+      }
+      // 工具栏/浮动动作条等可交互控件放行不吞不关，否则展开卡片时第一次点「正式生成」
+      // 会被吞掉 → 只关卡不触发，要点两次才生效。
+      if (target.closest("button,a,input,select,textarea,summary")) return;
       setExpandedId(null);
     };
     document.addEventListener("pointerdown", markPointerStart, true);
@@ -271,7 +280,16 @@ export default function ProjectGrouping() {
   if (projectQuery.isLoading) return <Shell><p className="text-sm text-slate-500">正在读取项目…</p></Shell>;
   if (projectQuery.isError || !project) return <Shell><ErrorPanel error={projectQuery.error ?? new Error("项目快照为空")} retry={() => void projectQuery.refetch()} /></Shell>;
 
+  const onDragStart = (event: DragStartEvent) => {
+    const id = String(event.active.id);
+    if (!id.startsWith("asset:")) return;
+    const assetId = id.slice(6);
+    const asset = (project?.skus ?? []).flatMap((sku) => sku.assets ?? []).find((item) => item.id === assetId)
+      ?? (project?.assets ?? []).find((item) => item.id === assetId);
+    setActiveDrag(asset ?? null);
+  };
   const onDragEnd = (event: DragEndEvent) => {
+    setActiveDrag(null);
     if (event.over) reorganize.mutate({ activeId: String(event.active.id), overId: String(event.over.id) });
   };
   const errors = [upload.error, skuImport.error, prepare.error, generate.error, pause.error, reorganize.error, save.error, removeAsset.error, removeCluster.error, saveSettings.error].filter(Boolean);
@@ -283,7 +301,7 @@ export default function ProjectGrouping() {
   return <Shell>
     {needsCountry && (
       <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/50 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="选择目标国家">
-        <div className="w-[min(28rem,calc(100vw-2rem))] rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl">
+        <div className="w-[min(28rem,calc(100vw-2rem))] rounded-2xl border border-white/70 bg-white/80 p-6 shadow-2xl backdrop-blur-xl">
           <h2 className="mb-1 text-lg font-bold tracking-tight">选择目标国家</h2>
           <p className="mb-4 text-sm text-slate-500">进入项目前请先选择一次目标国家，卖点规划与文案会按该国语言生成。</p>
           <label className="mb-4 block text-xs font-medium text-slate-500">国家<select aria-label="目标国家" className="mt-1" value={countryDraft} onChange={(event) => setCountryDraft(event.target.value)}>{REAL_MARKETS.map(([code, label]) => <option key={code} value={code}>{label}</option>)}</select></label>
@@ -295,12 +313,16 @@ export default function ProjectGrouping() {
     <div className="mb-5"><ImportPanel disabled={actionBusy} aiRecognitionEnabled={project.defaultConfig?.aiRecognitionEnabled ?? false} onAiRecognitionChange={(checked) => saveSettings.mutateAsync({ platform: project.defaultConfig?.platform || project.platform?.toLowerCase() || "generic", market: project.defaultConfig?.market || project.market || "SEA", sellerTier: project.defaultConfig?.sellerTier ?? "general", size: project.defaultConfig?.size || project.size || "1:1", resolution: (project.defaultConfig?.resolution || project.resolution || "1k").toLowerCase(), globalPrompt: project.defaultConfig?.globalPrompt || "", aiRecognitionEnabled: checked })} onUpload={(files, mode) => upload.mutateAsync({ files, mode })} onSkuImport={(skus, mode) => skuImport.mutateAsync({ skus, mode })} onImported={() => undefined} /></div>
     {uploadResult && <div className="mb-5 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm">成功导入 {uploadResult.asset_count} 个素材{uploadResult.rejected.length ? `，${uploadResult.rejected.length} 个未导入` : ""}。</div>}
     {localError instanceof ApiError && <p className="mb-5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">{userErrorMessage(localError)}</p>}
-    {actionNotice && <p className={`mb-5 rounded-xl border px-4 py-3 text-sm ${nameRequiredNotice ? "border-red-200 bg-red-50 font-semibold text-red-700" : "border-blue-200 bg-blue-50 text-blue-800"}`}>{actionNotice}</p>}
+    {actionNotice && <p className={`mb-5 rounded-xl border px-4 py-3 text-sm ${nameRequiredNotice ? "border-red-200 bg-red-50 font-semibold text-red-700" : "border-indigo-200 bg-indigo-50 text-indigo-700"}`}>{actionNotice}</p>}
     {globalError && <div className="mb-5"><ErrorPanel error={globalError} /></div>}
-    <DndContext sensors={sensors} onDragEnd={onDragEnd}><ProductGrid>{project.skus.map((sku) => {
+    <DndContext sensors={sensors} measuring={{ droppable: { strategy: MeasuringStrategy.BeforeDragging } }} onDragStart={onDragStart} onDragCancel={() => setActiveDrag(null)} onDragEnd={onDragEnd}><ProductGrid>{project.skus.map((sku) => {
       const assets = sku.assets ?? project.assets.filter((asset) => sku.assetIds.includes(asset.id));
       return <ProductCard key={sku.id} sku={sku} assets={assets} selected={!deselectedIds.has(sku.id)} expanded={expandedId === sku.id} disabled={removeAsset.isPending || removeCluster.isPending} onOpen={() => setExpandedId(sku.id)} onClose={() => setExpandedId(null)} onSave={(payload, expectedVersion) => save.mutateAsync({ skuId: sku.id, expectedVersion, payload })} onReload={() => projectQuery.refetch()} onDeleteAsset={(assetId) => removeAsset.mutate(assetId)} onDelete={() => removeCluster.mutate(sku.id)} onPause={() => pause.mutate([sku.id])} onSelect={(next) => setDeselectedIds((current) => { const copy = new Set(current); if (next) copy.delete(sku.id); else copy.add(sku.id); return copy; })} />;
-    })}</ProductGrid></DndContext>
+    })}</ProductGrid>
+      <DragOverlay dropAnimation={null}>
+        {activeDrag?.imageUrl ? <div className="grid size-16 place-items-center overflow-hidden rounded-lg border border-indigo-500 bg-white shadow-xl ring-2 ring-indigo-200"><img className="size-full object-contain" src={activeDrag.imageUrl} alt="拖拽中的商品参考图" /></div> : null}
+      </DragOverlay>
+    </DndContext>
     {!project.skus.length && <EmptyState title="还没有商品素材" description="在上方导入图片、文件夹或 ERP SKU。" />}
     <FloatingActions projectId={project.id} selectedCount={selectedClusters.length} busy={actionBusy} preparing={selectedPreparing} generating={selectedGenerating} activeWork={selectedActiveWork} onSelectAll={() => setDeselectedIds(new Set())} onDeselectAll={() => setDeselectedIds(new Set(project.skus.map((sku) => sku.id)))} onInvert={() => setDeselectedIds(new Set(project.skus.filter((sku) => !deselectedIds.has(sku.id)).map((sku) => sku.id)))} onPrepare={() => { if (!selectedActiveWork) prepare.mutate(); }} onGenerate={() => { if (!selectedActiveWork) generate.mutate(); }} onPause={() => { if (selectedActiveWork) pause.mutate(selectedClusters.map((sku) => sku.id)); }} />
   </Shell>;
@@ -308,7 +330,7 @@ export default function ProjectGrouping() {
 
 function ProductGrid({ children }: { children: ReactNode }) {
   const blank = useDroppable({ id: "blank-grid", data: { type: "blank" } });
-  return <section ref={blank.setNodeRef} className={`product-card-grid min-h-56 rounded-2xl ${blank.isOver ? "bg-blue-50" : ""}`} aria-label="商品分组网格">{children}</section>;
+  return <section ref={blank.setNodeRef} className={`product-card-grid min-h-56 rounded-2xl ${blank.isOver ? "bg-indigo-50/60" : ""}`} aria-label="商品分组网格">{children}</section>;
 }
 
 function ProjectToolbar({ project, pending, onSave }: { project: { id: string; name: string; defaultConfig?: ProductConfiguration; platform: string; market: string; size: string; resolution?: string }; pending: boolean; onSave: (input: ProductConfiguration) => Promise<unknown> }) {
@@ -356,7 +378,7 @@ function ProjectToolbar({ project, pending, onSave }: { project: { id: string; n
 }
 
 function FloatingActions({ projectId, selectedCount, busy, preparing, generating, activeWork, onSelectAll, onDeselectAll, onInvert, onPrepare, onGenerate, onPause }: { projectId: string; selectedCount: number; busy: boolean; preparing: boolean; generating: boolean; activeWork: boolean; onSelectAll: () => void; onDeselectAll: () => void; onInvert: () => void; onPrepare: () => void; onGenerate: () => void; onPause: () => void }) {
-  return <div className="fixed bottom-5 right-5 z-50 flex max-w-[calc(100vw-2.5rem)] flex-wrap items-center gap-2 rounded-2xl border border-slate-200 bg-white/95 p-2 shadow-2xl shadow-slate-300/70 backdrop-blur" aria-label="滚动常驻生成动作">
+  return <div className="fixed bottom-5 right-5 z-50 flex max-w-[calc(100vw-2.5rem)] flex-wrap items-center gap-2 rounded-2xl border border-white/70 bg-white/85 p-2 shadow-2xl shadow-indigo-950/10 backdrop-blur-xl" aria-label="滚动常驻生成动作">
     <button className="toolbar-choice min-h-9 px-3" type="button" onClick={onSelectAll}>全选</button>
     <button className="toolbar-choice min-h-9 px-3" type="button" onClick={onDeselectAll}>取消全选</button>
     <button className="toolbar-choice min-h-9 px-3" type="button" onClick={onInvert}>反选</button>

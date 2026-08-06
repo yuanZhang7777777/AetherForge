@@ -167,7 +167,7 @@ export function ResultGrid({ project }: { project: Project }) {
                       </label>
                     )}
                     <div className="mt-3 flex flex-wrap gap-2">
-                      {(output.status === "completed" || output.status === "failed") && <button className="text-sm font-semibold text-blue-700 disabled:text-slate-400" disabled={regenerate.isPending} onClick={() => regenerate.mutate(output.id)}>再生成 {outputName}</button>}
+                      {(output.status === "completed" || output.status === "failed") && <button className="text-sm font-semibold text-indigo-700 disabled:text-slate-400" disabled={regenerate.isPending} onClick={() => regenerate.mutate(output.id)}>再生成 {outputName}</button>}
                       {["queued", "running"].includes(output.status) && <button className="text-sm font-semibold text-amber-700 disabled:text-slate-400" disabled={pause.isPending} onClick={() => pause.mutate(output.id)}>暂停 {outputName}</button>}
                       {history.map((item) => <button className="text-sm text-slate-500" key={item.id} onClick={() => setSelectedOutputId(item.id)}>历史版本 {displaySlotName(item)} v{item.attempt}</button>)}
                     </div>
@@ -217,7 +217,7 @@ export function ResultGrid({ project }: { project: Project }) {
               <span className="mb-2 block">修改说明</span>
               <textarea value={description} onChange={(event) => setDescription(event.target.value)} />
             </label>
-            {revisionNotice && <p className="mt-3 rounded-xl bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-700" role="alert">{revisionNotice}</p>}
+            {revisionNotice && <p className="mt-3 rounded-xl bg-indigo-50 px-3 py-2 text-sm font-semibold text-indigo-700" role="alert">{revisionNotice}</p>}
             <button className="secondary-button mt-3 w-full" onClick={() => setRevisionNotice("修改反馈功能正在开发中")}>提交圈选修改</button>
           </section>
         )}

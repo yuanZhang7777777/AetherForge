@@ -112,7 +112,7 @@ export function ImportPanel({
           <h2 className="text-sm font-semibold text-slate-800">图片 / 文件夹</h2>
           <p className="text-xs text-slate-500">{files.length ? `已选择 ${imageFiles.length} 张图片${txtCount ? `、${txtCount} 个 TXT` : ""}` : "尚未选择图片"}</p>
         </div>
-        <div className="mt-3 rounded-xl border-2 border-dashed border-slate-300 bg-slate-50 px-4 py-4 text-center" onDragOver={(event) => event.preventDefault()} onDrop={dropFiles}>
+        <div className="mt-3 rounded-xl border-2 border-dashed border-indigo-200 bg-indigo-50/40 px-4 py-4 text-center transition hover:border-indigo-300 hover:bg-indigo-50/60" onDragOver={(event) => event.preventDefault()} onDrop={dropFiles}>
           <p className="font-medium text-slate-700">拖入图片或文件夹</p>
           <p className="mt-1 text-xs text-slate-500">JPEG、PNG、WebP、UTF-8 TXT</p>
           <div className="relative mt-3 inline-block">
@@ -133,7 +133,7 @@ export function ImportPanel({
       </div>
       </div>
       <div className="flex items-center justify-center gap-1 self-stretch rounded-xl border border-slate-100 px-3 py-2 xl:flex-col">
-        <label className="inline-flex items-center gap-1 text-xs font-medium text-slate-500" title="开启后用 AI 识别商品名称与信息，与你填写的内容融合（你填的优先）"><input aria-label="AI 商品识别" className="size-4" type="checkbox" checked={aiRecognitionEnabled ?? false} disabled={disabled} onChange={(event) => { void onAiRecognitionChange?.(event.target.checked); }} />AI 识别</label>
+        <label className="inline-flex items-center gap-1 text-xs font-semibold text-indigo-600" title="开启后用 AI 识别商品名称与信息，与你填写的内容融合（你填的优先）"><input aria-label="AI 商品识别" className="size-4 accent-indigo-600" type="checkbox" checked={aiRecognitionEnabled ?? false} disabled={disabled} onChange={(event) => { void onAiRecognitionChange?.(event.target.checked); }} />AI 识别</label>
         <p className="hidden text-[11px] leading-tight text-slate-400 xl:block xl:max-w-20 xl:text-center">导入并自动出图时自动开启</p>
       </div>
       <div className="min-w-0 rounded-xl border border-slate-100 p-3">

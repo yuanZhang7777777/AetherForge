@@ -7,7 +7,9 @@ from __future__ import annotations
 
 import hashlib
 import ipaddress
+import logging
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 
 import requests
 from sqlalchemy.orm import Session
@@ -17,6 +19,8 @@ from ..config import settings
 from ..models import Asset, Batch, Cluster, ClusterAsset, SkuImportItem
 from ..storage import get_storage
 from .assets import UploadError, _sha256, _validate_image, request_cluster_preparation
+
+logger = logging.getLogger(__name__)
 
 _FALLBACK_NAME = "名称待确认"
 
@@ -127,14 +131,15 @@ def download_catalog_image(url: str, session=None) -> tuple[bytes, str]:
                 continue
             if response.status_code != 200:
                 raise CatalogError("Catalog image could not be downloaded")
-            content_type = response.headers.get("Content-Type", "").split(";", 1)[0].lower()
-            if content_type not in {"image/jpeg", "image/png"}:
-                raise CatalogError("Catalog image is not supported")
+            # 不做 Content-Type 头硬校验：ERP 常把 jpeg 标成 image/jpg/octet-stream，
+            # 真实格式由调用方 _validate_image 解码字节判定。
+            content_type = response.headers.get("Content-Type", "")
             try:
                 content_length = int(response.headers.get("Content-Length", "0"))
             except ValueError as exc:
                 raise CatalogError("Catalog image could not be downloaded") from exc
             if content_length > settings.catalog_max_image_bytes:
+                logger.warning("catalog image too large by header url=%s bytes=%s", current, content_length)
                 raise CatalogError("Catalog image is too large")
             chunks: list[bytes] = []
             total = 0
@@ -252,12 +257,42 @@ def import_skus(
     except CatalogError:
         products = None
 
+    # 并行预下载新 SKU 的 ERP 图片：串行逐张下载在批量导入时极慢（每张一次跨网 HTTP 请求）。
+    existing = {c.sku: c for c in db.query(Cluster).filter(Cluster.batch_id == batch.id).all()}
+    images: dict[str, tuple[bytes, str]] = {}
+    new_with_product = [
+        sku
+        for sku in clean
+        if sku not in existing and products is not None and products.get(sku)
+    ]
+    if new_with_product:
+
+        def _fetch_image(sku: str) -> tuple[str, bytes | None, str]:
+            pic = products[sku].get("pic")
+            try:
+                data, content_type = download_catalog_image(pic)
+                return sku, data, content_type
+            except (CatalogError, UploadError) as exc:
+                logger.warning(
+                    "catalog image import failed sku=%s pic=%r err=%s: %s",
+                    sku,
+                    pic,
+                    type(exc).__name__,
+                    exc,
+                )
+                return sku, None, ""
+
+        with ThreadPoolExecutor(max_workers=min(8, len(new_with_product))) as pool:
+            for sku, data, content_type in pool.map(_fetch_image, new_with_product):
+                if data is not None:
+                    images[sku] = (data, content_type)
+
     imported = failed = 0
     items: list[dict] = []
     for sku in clean:
         product = products.get(sku) if products is not None else None
         product_name = str((product or {}).get("productName") or "").strip()[:200]
-        cluster = db.query(Cluster).filter_by(batch_id=batch.id, sku=sku).first()
+        cluster = existing.get(sku)
 
         if cluster is not None:
             if cluster.archived_at is not None:
@@ -285,11 +320,23 @@ def import_skus(
             failed += 1
             items.append(_fail_item(sku, "sku_not_found", "SKU 不存在或无可用商品图片"))
             continue
-        try:
-            data, content_type = download_catalog_image(product.get("pic"))
-            normalized, forced_content_type, width, height = _validate_image(data, f"{sku}.jpg")
-        except (CatalogError, UploadError):
+        image = images.get(sku)
+        if image is None:
             failed += 1
+            items.append(_fail_item(sku, "catalog_image_invalid", "商品图片无法导入"))
+            continue
+        data, _content_type = image
+        try:
+            normalized, forced_content_type, width, height = _validate_image(data, f"{sku}.jpg")
+        except (CatalogError, UploadError) as exc:
+            failed += 1
+            logger.warning(
+                "catalog image import failed sku=%s pic=%r err=%s: %s",
+                sku,
+                (product or {}).get("pic"),
+                type(exc).__name__,
+                exc,
+            )
             items.append(_fail_item(sku, "catalog_image_invalid", "商品图片无法导入"))
             continue
         try:

@@ -105,6 +105,7 @@ def update_cluster(
         _touch(cluster)
         # 提示词是 N2 的输出，编辑只需新建 PromptVersion（approved 随之更新），无需重跑 N2；
         # 只有影响 N2 输入的字段变更才需要重新预备，否则会把用户刚编辑的中文提示词冲掉。
+        # asset_order 不重排：拖拽换序不改变身份锁/主图（N2 输入），生成时按最新顺序快照即可
         needs_requeue = any(
             key in payload
             for key in (
@@ -116,7 +117,6 @@ def update_cluster(
                 "platform_override",
                 "market_override",
                 "seller_tier_override",
-                "asset_order",
             )
         )
         if cluster.preparation_status == "ready" and needs_requeue:
@@ -149,21 +149,34 @@ def merge_asset_into_cluster(
     existing = next((c for c in target.cluster_assets if c.asset_id == asset.id), None)
     if existing is None:
         max_order = max((c.order for c in target.cluster_assets), default=0)
-        db.add(
-            ClusterAsset(
-                cluster_id=target.id,
-                asset_id=asset.id,
-                role="reference",
-                order=max_order + 1,
+        link = asset.cluster_asset
+        if link is not None and link.cluster_id != target.id:
+            # cluster_assets.asset_id 唯一：跨商品移动时改挂原关联行到目标商品，
+            # 不能重复 INSERT，否则触发 UniqueViolation。
+            link.cluster_id = target.id
+            link.role = "reference"
+            link.order = max_order + 1
+        else:
+            db.add(
+                ClusterAsset(
+                    cluster_id=target.id,
+                    asset_id=asset.id,
+                    role="reference",
+                    order=max_order + 1,
+                )
             )
-        )
+        # 只加参考图：不改变身份锁/主图（N2 输入），ready 状态仍有效；
+        # 参考图只在正式生成时快照使用，无需重新预备生成。
         _touch(target)
-        if target.preparation_status == "ready":
-            _requeue(target)
 
     if source is not None and source.id != target.id:
-        remaining = [c for c in source.cluster_assets if c.asset_id != asset.id]
-        if not remaining:
+        db.flush()
+        remaining = (
+            db.query(ClusterAsset)
+            .filter(ClusterAsset.cluster_id == source.id, ClusterAsset.asset_id != asset.id)
+            .count()
+        )
+        if remaining == 0:
             source.archived_at = source.archived_at or _now()
         _touch(source)
     return target

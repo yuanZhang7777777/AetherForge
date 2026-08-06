@@ -294,7 +294,7 @@ export function PromptEditor({
       <section className="rounded-lg bg-slate-50 p-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h3 className="text-sm font-semibold text-slate-700">{promptSectionTitle}</h3>
-          {preparing && <span className="text-xs font-semibold text-blue-700">{progressLabel}{progressPercent != null ? ` · ${progressPercent}%` : ` ${progressCurrent}/${progressTotal}`}</span>}
+          {preparing && <span className="text-xs font-semibold text-indigo-700">{progressLabel}{progressPercent != null ? ` · ${progressPercent}%` : ` ${progressCurrent}/${progressTotal}`}</span>}
         </div>
         {preparing && <ProgressBar current={progressCurrent} total={progressTotal} percent={progressPercent ?? undefined} />}
         <div className="mt-3 grid gap-3 md:grid-cols-2">
@@ -337,11 +337,13 @@ function ProgressBar({ current, total, percent }: { current: number; total: numb
 }
 
 function FactEvidence({ fact }: { fact: PromptFact }) {
+  // 服务端 confidence 为 0-100 整数，测试/旧版 fixture 用 0-1，统一归一化成百分比
+  const percent = Math.round(fact.confidence > 1 ? fact.confidence : fact.confidence * 100);
   return (
     <article className="rounded-md bg-slate-50 px-2 py-1.5">
       <p className="font-medium text-slate-800">{fact.statement}</p>
       <p className="mt-0.5 text-slate-500">
-        {{ confirmed: "已确认", observed: "图片观察", inferred: "辅助判断" }[fact.fact_class]} · {Math.round(fact.confidence * 100)}%
+        {{ confirmed: "已确认", observed: "图片观察", inferred: "辅助判断" }[fact.fact_class]} · {percent}%
       </p>
       {fact.evidence_refs.length > 0 && <p className="mt-0.5 text-slate-400">来源：{Array.from(new Set(fact.evidence_refs.map(evidenceLabel))).join("、")}</p>}
       {fact.review_note && !/结构化|异常|price|certification|medical/i.test(fact.review_note) && <p className="mt-0.5 text-amber-700">{fact.review_note}</p>}

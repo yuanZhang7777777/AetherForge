@@ -66,7 +66,10 @@ def _serve_spa(request: Request, db: Session) -> FileResponse | RedirectResponse
         if uid is not None:
             user = db.get(User, uid)
             if user is not None and user.is_active:
-                return FileResponse(DIST_ROOT / "index.html")
+                return FileResponse(
+                    DIST_ROOT / "index.html",
+                    headers={"Cache-Control": "no-store"},
+                )
     return RedirectResponse(url="/login/", status_code=302)
 
 

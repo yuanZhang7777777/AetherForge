@@ -190,10 +190,10 @@ def _merge_recognition(db: Session, cluster: Cluster) -> None:
 def _n2_identity_lock(db: Session, cluster: Cluster) -> None:
     name = (cluster.product_name or "").strip()
     if name:
-        lock = f"主商品 {name}，部件/数量/颜色/布局与参考图一致，禁止增减部件、禁止虚构内部结构、禁止混入其他 SKU 属性。"
+        lock = f"主商品 {name}：部件、数量、颜色、布局与参考图一致。"
     else:
         observed = ((cluster.analysis_snapshot or {}).get("identity") or {}).get("observed_identity") or ""
-        lock = f"以参考图为准，保持可见商品结构不变：{observed}".strip() if observed else "以参考图为准，保持商品结构、部件、颜色、Logo、接口、排列一致，禁止增减。"
+        lock = f"主商品以参考图为准：{observed}".strip() if observed else "主商品以参考图为准：结构、部件、颜色、Logo、接口、排列一致。"
     cluster.identity_lock = lock[:2000]
 
 
