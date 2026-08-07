@@ -54,6 +54,11 @@ function markerPosition(annotation: ReviewAnnotation, bounds: DOMRect | undefine
   return { left: `${box.left + (x + width / 2) * box.width}px`, top: `${box.top + (y + height / 2) * box.height}px` };
 }
 
+function downloadName(...parts: string[]) {
+  const base = parts.join("_").replace(/[<>:"/\\|?*\x00-\x1f]+/g, "").replace(/\s+/g, "_").replace(/_+/g, "_").replace(/^_+|_+$/g, "");
+  return `${base || "image"}.png`;
+}
+
 export function ResultGrid({ project }: { project: Project }) {
   const queryClient = useQueryClient();
   const latestBySku = useMemo(() => project.skus.map((sku) => ({ sku, latest: currentOutputs(sku.outputs) })), [project]);
@@ -161,10 +166,13 @@ export function ResultGrid({ project }: { project: Project }) {
                       {output.imageUrl ? <img src={output.imageUrl} alt={`${outputName}结果图`} loading="lazy" decoding="async" /> : <span>{output.failureReason ?? "等待结果"}</span>}
                     </button>
                     {output.status === "completed" && output.imageUrl && (
-                      <label className="mt-3 flex items-center gap-2 text-sm text-slate-700">
-                        <input className="size-4" type="checkbox" checked={selectedIds.has(output.id)} onChange={() => toggle(output.id)} />
-                        导出 {outputName} v{output.attempt}
-                      </label>
+                      <div className="mt-3 flex flex-wrap items-center gap-3 text-sm text-slate-700">
+                        <label className="flex items-center gap-2">
+                          <input className="size-4" type="checkbox" checked={selectedIds.has(output.id)} onChange={() => toggle(output.id)} />
+                          导出 {outputName} v{output.attempt}
+                        </label>
+                        <a className="font-semibold text-indigo-700" href={output.imageUrl} download={downloadName(project.name, sku.name, outputName, `v${output.attempt}`)}>下载 {outputName} v{output.attempt}</a>
+                      </div>
                     )}
                     <div className="mt-3 flex flex-wrap gap-2">
                       {(output.status === "completed" || output.status === "failed") && <button className="text-sm font-semibold text-indigo-700 disabled:text-slate-400" disabled={regenerate.isPending} onClick={() => regenerate.mutate(output.id)}>再生成 {outputName}</button>}
@@ -185,7 +193,15 @@ export function ResultGrid({ project }: { project: Project }) {
         {zip.isError && <ErrorPanel error={zip.error} retry={() => zip.mutate()} />}
         {regenerate.isError && <ErrorPanel error={regenerate.error} retry={() => { if (selectedOutput) regenerate.mutate(selectedOutput.id); }} />}
         {pause.isError && <ErrorPanel error={pause.error} retry={() => { if (selectedOutput) pause.mutate(selectedOutput.id); }} />}
-        <button className="primary-button mt-4 w-full" disabled={!selectedIds.size || zip.isPending} onClick={() => zip.mutate()}>
+        <div className="mt-4 grid grid-cols-2 gap-2">
+          <button className="secondary-button justify-center" type="button" onClick={() => setSelectedIds(new Set(completed.map((output) => output.id)))}>
+            勾选全部
+          </button>
+          <button className="secondary-button justify-center" type="button" onClick={() => setSelectedIds(new Set())}>
+            取消勾选
+          </button>
+        </div>
+        <button className="primary-button mt-3 w-full" disabled={!selectedIds.size || zip.isPending} onClick={() => zip.mutate()}>
           下载选中 ZIP（{selectedIds.size} 张）
         </button>
         {selectedOutput && (

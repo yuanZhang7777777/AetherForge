@@ -1,6 +1,9 @@
 """项目路由：create/settings/snapshot/progress/prepare/assets/sku-import/confirm/generate/pause/preflight/export。"""
 from __future__ import annotations
 
+import re
+from urllib.parse import quote
+
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
@@ -37,6 +40,15 @@ from ..services.template import global_fallback_template
 from ._helpers import coerce_uuid
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
+
+_DISPOSITION_UNSAFE = re.compile(r'[^A-Za-z0-9._-]+')
+
+
+def _attachment_disposition(filename: str) -> str:
+    ascii_name = _DISPOSITION_UNSAFE.sub("_", filename).strip("._") or "export.zip"
+    if not ascii_name.lower().endswith(".zip"):
+        ascii_name += ".zip"
+    return f'attachment; filename="{ascii_name}"; filename*=UTF-8\'\'{quote(filename)}'
 
 
 def _get_batch(db: Session, project_id: str, user: User | None = None) -> Batch:
@@ -245,5 +257,5 @@ def export(project_id: str, payload: ExportRequest, request: Request, db: Sessio
     return Response(
         content=data,
         media_type="application/zip",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={"Content-Disposition": _attachment_disposition(filename)},
     )

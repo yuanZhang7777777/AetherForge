@@ -527,6 +527,26 @@ test("posts only selected generation IDs when downloading the ZIP", async () => 
   expect(JSON.parse(String(call?.[1]?.body)).generation_ids).not.toContain("generation-1");
 });
 
+test("offers single-image downloads and bulk ZIP selection controls", async () => {
+  renderApp("/projects/project-demo/results");
+
+  const single = await screen.findByRole("link", { name: "下载 标准白底产品图 v1" });
+  expect(single).toHaveAttribute("href", "/api/results/result-1/media/");
+  expect(single.getAttribute("download")).toContain("标准白底产品图");
+
+  const first = screen.getByRole("checkbox", { name: "导出 标准白底产品图 v1" });
+  fireEvent.click(first);
+  expect(first).not.toBeChecked();
+
+  fireEvent.click(screen.getByRole("button", { name: "勾选全部" }));
+  expect(first).toBeChecked();
+  expect(screen.getByRole("button", { name: "下载选中 ZIP（8 张）" })).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "取消勾选" }));
+  expect(first).not.toBeChecked();
+  expect(screen.getByRole("button", { name: "下载选中 ZIP（0 张）" })).toBeDisabled();
+});
+
 test("exports completed results by default without approval and shows the generation prompt", async () => {
   const pendingProject = {
     ...project,
