@@ -155,6 +155,9 @@ def test_gpt55_system_prompt_is_neutral_designer_node() -> None:
     text = n_prepare_single_gpt55_system("TH")
     assert "图片设计师" in text
     assert "先理解商品" in text
+    assert "转化信息层级" in text
+    assert "买家决策信息" in text
+    assert "主图必须让买家一眼看懂商品是什么、用来做什么、为什么值得点进来" in text
     assert "每张图服务不同购买决策" in text
     assert "不要编造商品没有的功能" in text
     assert "1–4" not in text
