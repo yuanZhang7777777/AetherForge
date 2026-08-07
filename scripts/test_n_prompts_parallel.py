@@ -10,7 +10,7 @@ from types import SimpleNamespace
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import backend.services.prepare as prepare_module
-from backend.prompts import n_prepare_single_gpt55_system
+from backend.prompts import n_prepare_single_gpt55_system, n_prepare_single_gpt55_user
 from backend.services.prepare import _generate_n_prompts_parallel, _gpt55_single_node, _merge_single_node_identity, _n_prompts
 from backend.services.prepare import _prompt_item
 
@@ -155,6 +155,8 @@ def test_gpt55_system_prompt_is_neutral_designer_node() -> None:
     text = n_prepare_single_gpt55_system("TH")
     assert "图片设计师" in text
     assert "先理解商品" in text
+    assert "输入信息" in text
+    assert "自行理解后用于设计" in text
     assert "转化信息层级" in text
     assert "买家决策信息" in text
     assert "主图必须让买家一眼看懂商品是什么、用来做什么、为什么值得点进来" in text
@@ -168,8 +170,30 @@ def test_gpt55_system_prompt_is_neutral_designer_node() -> None:
         "高大促",
         "强红黄背景",
         "递进演示使用或安装步骤，顺序清晰",
+        "主图左上角默认",
+        "左上角默认放店铺名",
+        "产品名称是高优先级事实源",
+        "尺寸/规格可能藏在产品名称",
+        "A3/A4",
+        "pcs/pack",
+        "store_name",
+        "variant_specs",
     ):
         assert phrase not in text
+
+
+def test_gpt55_user_prompt_passes_product_name_without_classifying() -> None:
+    text = n_prepare_single_gpt55_user(
+        "直接梯形马卡5号-黑色 菱格鲜花包装袋",
+        ["店铺名称：Example Store", "尺寸：12cm x 8cm"],
+        "PH",
+        "",
+        [{"order": 1, "name": "Shopee high-CTR main poster"}],
+    )
+    assert "用户填写商品名称：直接梯形马卡5号-黑色 菱格鲜花包装袋" in text
+    assert "直接梯形马卡5号-黑色 菱格鲜花包装袋" in text
+    assert "可能混含" not in text
+    assert "都必须作为事实解析" not in text
 
 
 def test_gpt55_single_node_uses_one_apimart_call() -> None:
