@@ -109,6 +109,7 @@ export interface SkuImportResult {
 
 export interface ClusterUpdateInput {
   name?: string;
+  store_name?: string;
   product_facts?: string;
   relation_type?: RelationType;
   identity_lock?: string;
@@ -151,6 +152,7 @@ export interface ProductOverrides {
 export interface ProductSku {
   id: string;
   name: string;
+  storeName?: string;
   productNameSource?: "ai" | "manual" | "erp" | "blank";
   sku?: string;
   relationType?: RelationType;

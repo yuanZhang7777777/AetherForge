@@ -274,6 +274,8 @@ def _serialize_sku(
         "name": _public_product_name(cluster),
         "productName": _public_product_name(cluster),
         "productNameSource": analysis.get("product_name_source"),
+        "storeName": cluster.store_name,
+        "store_name": cluster.store_name,
         "version": cluster.version,
         "relationType": cluster.relation_type,
         "preparationStatus": cluster.preparation_status,

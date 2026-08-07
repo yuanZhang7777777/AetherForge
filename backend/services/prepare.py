@@ -425,6 +425,7 @@ def _gpt55_single_node(db: Session, cluster: Cluster, site: str) -> tuple[str, d
                 site,
                 person_policy,
                 slots,
+                store_name=str(getattr(cluster, "store_name", "") or "").strip(),
             ),
             image_sources=image_sources,
             max_tokens=settings.apimart_prompt_max_output_tokens,

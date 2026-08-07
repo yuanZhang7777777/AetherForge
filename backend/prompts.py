@@ -589,11 +589,14 @@ def n_prepare_single_gpt55_user(
     site: str,
     person_policy: str,
     slots: list[dict],
+    *,
+    store_name: str = "",
 ) -> str:
     slot_lines = "\n".join(f"- 槽位 {s.get('order')}：{s.get('name')}" for s in slots)
     return "\n".join(
         [
             f"用户填写商品名称：{product_name or '(未填写，按图片识别)'}",
+            f"用户填写店铺名称：{store_name or '(未填写)'}",
             "用户补充信息："
             + ("\n" + "\n".join(f"  - {p}" for p in facts) if facts else "(未提供)"),
             f"站点：{site}",

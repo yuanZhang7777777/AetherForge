@@ -189,8 +189,10 @@ def test_gpt55_user_prompt_passes_product_name_without_classifying() -> None:
         "PH",
         "",
         [{"order": 1, "name": "Shopee high-CTR main poster"}],
+        store_name="Example Store",
     )
     assert "用户填写商品名称：直接梯形马卡5号-黑色 菱格鲜花包装袋" in text
+    assert "用户填写店铺名称：Example Store" in text
     assert "直接梯形马卡5号-黑色 菱格鲜花包装袋" in text
     assert "可能混含" not in text
     assert "都必须作为事实解析" not in text
@@ -241,6 +243,7 @@ def test_gpt55_single_node_uses_one_apimart_call() -> None:
         cluster = SimpleNamespace(
             name="",
             product_name="",
+            store_name="Toy Store",
             product_facts="",
             identity_lock="",
             analysis_snapshot={},
@@ -253,6 +256,7 @@ def test_gpt55_single_node_uses_one_apimart_call() -> None:
         prepare_module.APIMartClient = original_client
 
     assert len(fake_client.calls) == 1
+    assert "用户填写店铺名称：Toy Store" in fake_client.calls[0]["user"]
     assert style_brief == "柔和明亮的可爱玩具广告风格"
     assert sorted(prompts) == [1, 2]
     assert "red/yellow/black" not in prompts[1]["final"]

@@ -143,6 +143,7 @@ class ProductSku(BaseModel):
     name: str
     product_name: str | None = None
     product_name_source: str | None = None
+    store_name: str | None = None
     sku: str | None = None
     import_status: str | None = None
     relation_type: str | None = None
@@ -310,6 +311,7 @@ class PromptsItem(BaseModel):
 
 class ClusterUpdateInput(BaseModel):
     name: str | None = None
+    store_name: str | None = None
     product_facts: str | None = None
     relation_type: str | None = None
     identity_lock: str | None = None

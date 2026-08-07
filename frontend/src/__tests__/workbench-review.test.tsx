@@ -30,13 +30,14 @@ test("combines dirty card fields into one explicit versioned save", async () => 
   render(<ProductCard {...props} sku={sku} onSave={onSave} />);
 
   fireEvent.change(screen.getByLabelText("商品名称 旧名称"), { target: { value: "新名称" } });
+  fireEvent.change(screen.getByLabelText("店铺名称 新名称"), { target: { value: "新店铺" } });
   fireEvent.change(screen.getByLabelText("商品平台 新名称"), { target: { value: "tiktok" } });
   fireEvent.change(screen.getByLabelText("商品国家 新名称"), { target: { value: "VN" } });
   fireEvent.change(screen.getByLabelText("补充信息 新名称"), { target: { value: "展示使用方式\n风格/要求：自然光" } });
   fireEvent.blur(screen.getByLabelText("补充信息 新名称"));
 
   await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
-  expect(onSave).toHaveBeenCalledWith({ name: "新名称", product_facts: "展示使用方式\n风格/要求：自然光", platform_override: "tiktok", market_override: "VN" }, 1);
+  expect(onSave).toHaveBeenCalledWith({ name: "新名称", store_name: "新店铺", product_facts: "展示使用方式\n风格/要求：自然光", platform_override: "tiktok", market_override: "VN" }, 1);
 });
 
 test("preserves a dirty card draft and retries with the refreshed version after a 409", async () => {

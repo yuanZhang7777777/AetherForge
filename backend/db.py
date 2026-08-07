@@ -1,7 +1,7 @@
 """SQLAlchemy 2.0 基础设施：engine / session / Base / init_db。"""
 from __future__ import annotations
 
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 from .config import settings
@@ -52,6 +52,7 @@ def init_db() -> None:
     from .seed import seed_output_template
 
     Base.metadata.create_all(bind=engine)
+    _ensure_columns()
     db = SessionLocal()
     try:
         from .models import User
@@ -72,11 +73,17 @@ def init_db() -> None:
         db.close()
 
 
+def _ensure_columns() -> None:
+    """补齐历史库的轻量列变更；正式迁移系统还没引入，启动时只做幂等加列。"""
+    columns = {column["name"] for column in inspect(engine).get_columns("clusters")}
+    if "store_name" not in columns:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE clusters ADD COLUMN store_name VARCHAR(120) DEFAULT '' NOT NULL"))
+
+
 def wait_for_tables(timeout: float = 60.0) -> None:
     """worker 启动时等待 web 建表，避免查询早于 create_all 而报 relation does not exist。"""
     import time
-
-    from sqlalchemy import text
 
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:

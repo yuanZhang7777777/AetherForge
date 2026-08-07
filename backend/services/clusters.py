@@ -56,6 +56,9 @@ def update_cluster(
             analysis["product_name_source"] = "manual"
             cluster.analysis_snapshot = analysis
         changed = True
+    if "store_name" in payload and payload["store_name"] is not None:
+        cluster.store_name = str(payload["store_name"]).strip()[:120]
+        changed = True
     if "product_facts" in payload and payload["product_facts"] is not None:
         cluster.product_facts = str(payload["product_facts"])
         analysis = dict(cluster.analysis_snapshot or {})
@@ -110,6 +113,7 @@ def update_cluster(
             key in payload
             for key in (
                 "name",
+                "store_name",
                 "product_facts",
                 "relation_type",
                 "identity_lock",

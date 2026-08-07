@@ -13,7 +13,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT if (ROOT / "backend").is_dir() else Path("/app")))
 
-from backend.db import SessionLocal
+from backend.db import SessionLocal, init_db
 from backend.models import Batch, Cluster, User
 from backend.seed import seed_output_template
 from backend.services.template import global_fallback_template, template_slots
@@ -23,6 +23,7 @@ SLOT_NAMES = {1: "Shopee high-CTR main poster", 9: "Quality and trust"}
 
 
 def main() -> None:
+    init_db()
     db = SessionLocal()
     try:
         seed_output_template(db)

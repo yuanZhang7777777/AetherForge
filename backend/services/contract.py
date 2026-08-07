@@ -17,6 +17,7 @@ def preparation_fingerprint(batch: Batch, cluster: Cluster) -> str:
         "effective_config": _effective_config(batch, cluster),
         "identity": {
             "product_name": cluster.product_name,
+            "store_name": cluster.store_name,
             "product_facts": cluster.product_facts,
             "identity_lock": cluster.identity_lock,
             "prompt_override": cluster.prompt_override,

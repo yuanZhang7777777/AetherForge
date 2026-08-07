@@ -198,6 +198,7 @@ class Cluster(Base):
     name: Mapped[str] = mapped_column(String(200))
     sku: Mapped[str | None] = mapped_column(String(120), nullable=True)
     product_name: Mapped[str] = mapped_column(String(200), default="")
+    store_name: Mapped[str] = mapped_column(String(120), default="")
     product_facts: Mapped[str] = mapped_column(Text, default="")
     identity_lock: Mapped[str] = mapped_column(Text, default="")
     target_consumer: Mapped[str] = mapped_column(String(40), default="")

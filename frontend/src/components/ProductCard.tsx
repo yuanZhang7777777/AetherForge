@@ -8,6 +8,7 @@ import { PromptEditor } from "./PromptEditor";
 
 type Draft = {
   name: string;
+  storeName: string;
   productFacts: string;
   platformOverride: string;
   marketOverride: string;
@@ -117,6 +118,7 @@ function supplementFromSku(sku: ProductSku) {
 function draftFromSku(sku: ProductSku): Draft {
   return {
     name: chineseProductPhrase(sku.name || sku.identity?.product_name || ""),
+    storeName: sku.storeName ?? "",
     productFacts: supplementFromSku(sku),
     platformOverride: sku.overrides?.platform ?? "",
     marketOverride: sku.overrides?.market ?? "",
@@ -229,16 +231,18 @@ export function ProductCard({ sku, assets, selected, expanded = false, onOpen = 
     if (!serverChanged) return; // 服务器值未变：保留用户刚 blur 保存的内容，避免被旧回包覆盖
     setDraft((current) => ({
       name: current.name === savedDraft.name ? next.name : current.name,
+      storeName: current.storeName === savedDraft.storeName ? next.storeName : current.storeName,
       productFacts: current.productFacts === savedDraft.productFacts ? next.productFacts : current.productFacts,
       platformOverride: current.platformOverride === savedDraft.platformOverride ? next.platformOverride : current.platformOverride,
       marketOverride: current.marketOverride === savedDraft.marketOverride ? next.marketOverride : current.marketOverride,
     }));
     setSavedDraft(next);
-  }, [sku.id, sku.name, sku.productFacts, sku.facts, sku.productStyle, sku.brief, sku.identityLock, sku.identity, sku.overrides?.platform, sku.overrides?.market, savedDraft]);
+  }, [sku.id, sku.name, sku.storeName, sku.productFacts, sku.facts, sku.productStyle, sku.brief, sku.identityLock, sku.identity, sku.overrides?.platform, sku.overrides?.market, savedDraft]);
 
   const submit = async () => {
     const payload: ClusterUpdateInput = {};
     if (draft.name !== savedDraft.name) payload.name = draft.name;
+    if (draft.storeName !== savedDraft.storeName) payload.store_name = draft.storeName;
     if (draft.productFacts !== savedDraft.productFacts) payload.product_facts = draft.productFacts;
     if (draft.platformOverride !== savedDraft.platformOverride) payload.platform_override = draft.platformOverride || null;
     if (draft.marketOverride !== savedDraft.marketOverride) payload.market_override = draft.marketOverride || null;
@@ -281,6 +285,7 @@ export function ProductCard({ sku, assets, selected, expanded = false, onOpen = 
       </div>
       <div className="flex flex-col gap-2 p-3">
         <input aria-label={`商品名称 ${label}`} className="h-9 min-h-9 font-semibold" value={draft.name} placeholder="可不填，预备生成时识别" onChange={(event) => setDraft({ ...draft, name: event.target.value })} onBlur={() => void submit()} />
+        <input aria-label={`店铺名称 ${label}`} className="h-9 min-h-9 text-xs" value={draft.storeName} placeholder="店铺名称，可不填" onChange={(event) => setDraft({ ...draft, storeName: event.target.value })} onBlur={() => void submit()} />
         {nameSourceText && <p className="text-[11px] text-slate-500">{nameSourceText}</p>}
         <ProductConfigEditor label={label} draft={draft} setDraft={setDraft} onBlur={submit} saving={saving || !!disabled} />
         <textarea aria-label={`补充信息 ${label}`} className="min-h-20 resize-none py-1.5 text-xs" value={draft.productFacts} placeholder="材质、颜色、款式、使用限制、风格要求都写在这里" onChange={(event) => setDraft({ ...draft, productFacts: event.target.value })} onBlur={() => void submit()} />
@@ -337,6 +342,7 @@ function ProductInfoEditor({
     <h3 className="text-sm font-semibold text-slate-800">商品信息</h3>
     <div className="mt-3 grid gap-3">
       <label className="text-xs font-medium text-slate-500">商品名称<input aria-label={`商品名称 ${label}`} className="mt-1" value={draft.name} disabled={saving} onChange={(event) => setDraft({ ...draft, name: event.target.value })} onBlur={() => void onBlur()} /></label>
+      <label className="text-xs font-medium text-slate-500">店铺名称<input aria-label={`店铺名称 ${label}`} className="mt-1" value={draft.storeName} disabled={saving} placeholder="可不填" onChange={(event) => setDraft({ ...draft, storeName: event.target.value })} onBlur={() => void onBlur()} /></label>
       <label className="text-xs font-medium text-slate-500">补充信息<textarea aria-label={`补充信息 ${label}`} className="mt-1 min-h-28" value={draft.productFacts} disabled={saving} placeholder="材质、颜色、款式、使用限制、风格要求都写在这里" onChange={(event) => setDraft({ ...draft, productFacts: event.target.value })} onBlur={() => void onBlur()} /></label>
     </div>
   </section>;
