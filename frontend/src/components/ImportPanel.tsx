@@ -149,7 +149,7 @@ export function ImportPanel({
 }
 
 function skuErrorMessage(code: string | null | undefined) {
-  return ({ sku_not_found: "SKU 不存在或无可用商品图片", catalog_unavailable: "ERP 商品服务暂不可用", catalog_image_invalid: "商品图片无法导入", archive_failed: "商品图片归档失败", project_locked: "项目当前不可导入", login_expired: "登录已过期，请重新登录后导入" } as Record<string, string>)[code ?? ""] ?? "导入失败，请重试";
+  return ({ sku_not_found: "SKU 不存在或无可用商品图片", catalog_unavailable: "ERP 商品服务暂不可用", catalog_image_invalid: "商品图片无法导入", archive_failed: "商品图片归档失败", project_locked: "项目当前不可导入", login_expired: "登录已过期，请重新登录后导入", project_image_limit: "每个项目最多 100 张图片" } as Record<string, string>)[code ?? ""] ?? "导入失败，请重试";
 }
 
 function PendingImage({ file, index }: { file: File; index: number }) {

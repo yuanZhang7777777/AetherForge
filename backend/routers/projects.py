@@ -20,7 +20,13 @@ from ..schemas import (
     ProjectInput,
     SkuImportRequest,
 )
-from ..services.assets import UploadError, register_uploaded_asset, request_cluster_preparation
+from ..services.assets import (
+    MAX_PROJECT_IMAGES,
+    UploadError,
+    register_uploaded_asset,
+    remaining_project_image_capacity,
+    request_cluster_preparation,
+)
 from ..services.catalog import import_skus as import_catalog_skus
 from ..services.batches import (
     create_project,
@@ -130,7 +136,14 @@ async def upload_assets(
     if image_count > 100 or txt_count > 20:
         raise HTTPException(400, "单次最多上传 100 张图片和 20 个 TXT")
 
+    image_slots = remaining_project_image_capacity(db, batch)
     for file, rel in zip(files, paths):
+        is_image = not rel.lower().endswith(".txt")
+        if is_image and image_slots <= 0:
+            result["rejected"].append(
+                {"filename": rel, "code": "project_image_limit", "message": f"每个项目最多 {MAX_PROJECT_IMAGES} 张图片"}
+            )
+            continue
         try:
             data = await file.read()
         except Exception:
@@ -145,6 +158,8 @@ async def upload_assets(
             db.rollback()
             result["rejected"].append({"filename": rel, "code": "upload_failed", "message": str(exc)})
             continue
+        if is_image:
+            image_slots -= 1
         result["asset_count"] += 1
         cluster_id = str(asset.cluster_asset.cluster_id) if asset.cluster_asset else None
         result["imported"].append({"filename": rel, "asset_id": str(asset.id), "cluster_id": cluster_id})

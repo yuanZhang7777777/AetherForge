@@ -188,9 +188,8 @@ def merge_asset_into_cluster(
 
 def split_asset_out(db: Session, asset: Asset, actor_id=None) -> Cluster:
     """把素材从当前 cluster 拆出，独立成新的 cluster。"""
-    from datetime import datetime, timezone
-
-    source = asset.cluster_asset.cluster if asset.cluster_asset else None
+    link = asset.cluster_asset
+    source = link.cluster if link else None
     if source is None:
         raise ClusterNotFound("素材不在任何商品中，无需拆分")
     if asset.kind != "image":
@@ -205,13 +204,24 @@ def split_asset_out(db: Session, asset: Asset, actor_id=None) -> Cluster:
     )
     db.add(new_cluster)
     db.flush()
-    db.add(ClusterAsset(cluster_id=new_cluster.id, asset_id=asset.id, role="primary", order=1))
+    link.cluster_id = new_cluster.id
+    link.role = "primary"
+    link.order = 1
 
     _touch(source)
-    remaining = [c for c in source.cluster_assets if c.asset_id != asset.id]
+    db.flush()
+    remaining = (
+        db.query(ClusterAsset)
+        .filter(ClusterAsset.cluster_id == source.id)
+        .order_by(ClusterAsset.order, ClusterAsset.id)
+        .all()
+    )
     if not remaining:
-        source.archived_at = source.archived_at or datetime.now(timezone.utc)
+        source.archived_at = source.archived_at or _now()
     else:
+        for index, item in enumerate(remaining, start=1):
+            item.order = index
+            item.role = "primary" if index == 1 else "reference"
         if source.preparation_status == "ready":
             _requeue(source)
     return new_cluster

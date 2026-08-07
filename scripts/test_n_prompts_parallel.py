@@ -161,6 +161,13 @@ def test_gpt55_system_prompt_is_neutral_designer_node() -> None:
     assert "买家决策信息" in text
     assert "主图必须让买家一眼看懂商品是什么、用来做什么、为什么值得点进来" in text
     assert "每张图服务不同购买决策" in text
+    assert "电商详情页图片" in text
+    assert "每张图必须承担不同的信息任务" in text
+    assert "详情图模块" in text
+    assert "对比图" in text
+    assert "包装/运输/发货信任图" in text
+    assert "zh 中文策划必须写清" in text
+    assert "final 英文生图提示词必须自包含" in text
     assert "不要编造商品没有的功能" in text
     assert "1–4" not in text
     assert "1-4" not in text
@@ -178,6 +185,12 @@ def test_gpt55_system_prompt_is_neutral_designer_node() -> None:
         "pcs/pack",
         "store_name",
         "variant_specs",
+        "晾衣杆",
+        "阳台",
+        "蓝白",
+        "橙色",
+        "800x800",
+        "文字使用英语",
     ):
         assert phrase not in text
 

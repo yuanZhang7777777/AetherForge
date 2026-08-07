@@ -18,7 +18,14 @@ from urllib.parse import urljoin, urlparse
 from ..config import settings
 from ..models import Asset, Batch, Cluster, ClusterAsset, SkuImportItem
 from ..storage import get_storage
-from .assets import UploadError, _sha256, _validate_image, request_cluster_preparation
+from .assets import (
+    MAX_PROJECT_IMAGES,
+    UploadError,
+    _sha256,
+    _validate_image,
+    remaining_project_image_capacity,
+    request_cluster_preparation,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -265,6 +272,9 @@ def import_skus(
         for sku in clean
         if sku not in existing and products is not None and products.get(sku)
     ]
+    capacity = remaining_project_image_capacity(db, batch)
+    blocked_by_limit = set(new_with_product[capacity:])
+    new_with_product = new_with_product[:capacity]
     if new_with_product:
 
         def _fetch_image(sku: str) -> tuple[str, bytes | None, str]:
@@ -319,6 +329,10 @@ def import_skus(
         if not product:
             failed += 1
             items.append(_fail_item(sku, "sku_not_found", "SKU 不存在或无可用商品图片"))
+            continue
+        if sku in blocked_by_limit:
+            failed += 1
+            items.append(_fail_item(sku, "project_image_limit", f"每个项目最多 {MAX_PROJECT_IMAGES} 张图片"))
             continue
         image = images.get(sku)
         if image is None:

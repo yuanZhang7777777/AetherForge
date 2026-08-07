@@ -13,6 +13,7 @@ from ..storage import StorageError, get_storage
 
 MAX_IMAGE_BYTES = 20 * 1024 * 1024
 MAX_TXT_BYTES = 256 * 1024
+MAX_PROJECT_IMAGES = 100
 ALLOWED_IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp"}
 ALLOWED_IMAGE_FORMATS = {"JPEG", "PNG", "WEBP"}
 _IMAGE_SUFFIX_MAP = {"JPEG": ".jpg", "PNG": ".png", "WEBP": ".png"}
@@ -23,6 +24,30 @@ class UploadError(Exception):
         super().__init__(message)
         self.code = code
         self.message = message
+
+
+def active_project_image_count(db: Session, batch: Batch) -> int:
+    return (
+        db.query(Asset)
+        .filter_by(batch_id=batch.id, kind="image")
+        .filter(Asset.archived_at.is_(None))
+        .count()
+    )
+
+
+def remaining_project_image_capacity(db: Session, batch: Batch) -> int:
+    return max(0, MAX_PROJECT_IMAGES - active_project_image_count(db, batch))
+
+
+def ensure_project_image_capacity(db: Session, batch: Batch, incoming: int = 1) -> None:
+    if incoming <= 0:
+        return
+    remaining = remaining_project_image_capacity(db, batch)
+    if incoming > remaining:
+        raise UploadError(
+            "project_image_limit",
+            f"每个项目最多 {MAX_PROJECT_IMAGES} 张图片，当前还可导入 {remaining} 张",
+        )
 
 
 def _sha256(data: bytes) -> str:
@@ -97,6 +122,7 @@ def register_uploaded_asset(
 
     if len(data) > MAX_IMAGE_BYTES:
         raise UploadError("file_too_large", "图片不能超过 20 MiB")
+    ensure_project_image_capacity(db, batch, 1)
     normalized, forced_content_type, width, height = _validate_image(data, filename)
     storage_path = f"originals/{batch.id}/{uuid.uuid4().hex}"
     suffix = _IMAGE_SUFFIX_MAP.get(_image_format(normalized), ".png")
