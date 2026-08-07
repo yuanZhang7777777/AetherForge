@@ -154,6 +154,9 @@ def test_prompt_item_can_skip_legacy_front_load() -> None:
 def test_gpt55_system_prompt_is_neutral_designer_node() -> None:
     text = n_prepare_single_gpt55_system("TH")
     assert "图片设计师" in text
+    assert "先理解商品" in text
+    assert "每张图服务不同购买决策" in text
+    assert "不要编造商品没有的功能" in text
     assert "1–4" not in text
     assert "1-4" not in text
     for phrase in (
@@ -161,9 +164,6 @@ def test_gpt55_system_prompt_is_neutral_designer_node() -> None:
         "不要复制任何示例图配色",
         "高大促",
         "强红黄背景",
-        "主体占画面",
-        "产品完整清晰",
-        "促销或信任元素",
         "递进演示使用或安装步骤，顺序清晰",
     ):
         assert phrase not in text
