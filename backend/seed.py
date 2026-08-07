@@ -16,7 +16,7 @@ GLOBAL_SLOTS = (
     (4, "Real-life use", "Show the product being used naturally by a real person"),
     (5, "Pain point solution", "Contrast or before/after showing how the product solves a common pain point"),
     (6, "Size and material", "Show real scale and material texture"),
-    (7, "Usage steps", "Step-by-step 1-4 usage demo with short captions"),
+    (7, "Usage steps", "Step-by-step usage demo with short captions"),
     (8, "Lifestyle", "Open lifestyle scene with props, showing the life the product enables"),
     (9, "Quality and trust", "Styling/display state emphasizing quality and craftsmanship"),
 )
