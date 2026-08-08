@@ -85,6 +85,60 @@ def _extract_image_url(state) -> str:
     return candidates[0] if candidates else ""
 
 
+def _percent(value) -> str:
+    try:
+        number = max(0, min(1, float(value)))
+    except (TypeError, ValueError):
+        number = 0
+    return f"{round(number * 100):g}%"
+
+
+def _annotation_line(annotation: dict, index: int) -> str:
+    note = str(annotation.get("note") or "").strip()
+    kind = str(annotation.get("kind") or "area").strip() or "area"
+    rect = annotation.get("rect")
+    if isinstance(rect, list) and len(rect) >= 4:
+        area = (
+            f"x={_percent(rect[0])}, y={_percent(rect[1])}, "
+            f"width={_percent(rect[2])}, height={_percent(rect[3])}"
+        )
+    else:
+        area = "marked area"
+    suffix = f" - requested change: {note}" if note else ""
+    return f"{index}. {kind} at {area}{suffix}"
+
+
+def _revision_prompt_text(base_prompt: str, feedback: dict | None) -> str:
+    if not isinstance(feedback, dict):
+        return base_prompt
+    description = str(feedback.get("description") or "").strip()
+    tags = ", ".join(str(tag) for tag in feedback.get("issue_tags") or [] if str(tag).strip())
+    annotations = [
+        item for item in feedback.get("annotations") or []
+        if isinstance(item, dict)
+    ]
+    lines = [
+        "IMAGE EDITING REVISION TASK",
+        "Use the first reference image as the previous generated result to edit from.",
+        "Use the other reference images only to preserve the original product identity.",
+        "Keep the same product, composition, ecommerce layout, aspect ratio, and successful design elements.",
+        "Only change the parts requested by the user. Do not redesign unrelated areas.",
+    ]
+    if tags:
+        lines.append(f"Issue tags: {tags}.")
+    if description:
+        lines.append(f"Global edit request: {description}")
+    if annotations:
+        lines.append("Marked regions:")
+        lines.extend(_annotation_line(item, index) for index, item in enumerate(annotations, start=1))
+    lines.extend(["", "Original generation prompt:", base_prompt])
+    return "\n".join(lines)
+
+
+def _prompt_for_submission(gen: Generation) -> str:
+    return _revision_prompt_text(gen.prompt_text, (gen.rule_snapshot or {}).get("revision_feedback"))
+
+
 def _submit(db: Session, gen: Generation, client: APIMartClient) -> str | None:
     try:
         image_urls: list[str] = []
@@ -94,13 +148,14 @@ def _submit(db: Session, gen: Generation, client: APIMartClient) -> str | None:
                     image_urls.append(client.to_image_url(str(local)))
             except Exception:
                 continue
+        prompt_text = _prompt_for_submission(gen)
         gen.provider_payload = {
             "image_urls": image_urls,
             "size": gen.size,
             "resolution": gen.resolution,
         }
         db.flush()
-        task_id = client.submit_generation(gen.prompt_text, image_urls, gen.size, gen.resolution)
+        task_id = client.submit_generation(prompt_text, image_urls, gen.size, gen.resolution)
         gen.provider_task_id = task_id
         gen.status = "submitted"
         gen.submitted_at = _now()

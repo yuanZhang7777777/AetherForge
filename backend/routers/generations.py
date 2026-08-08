@@ -8,7 +8,7 @@ from ..auth import require_user
 from ..db import get_db
 from ..models import Generation
 from ..schemas import ReviewInput, RevisionInput
-from ..services.generation import regenerate_generation, retry_failed_generation
+from ..services.generation import regenerate_generation, retry_failed_generation, revise_generation
 from ._helpers import coerce_uuid
 
 router = APIRouter(prefix="/api/generations", tags=["generations"])
@@ -85,18 +85,20 @@ def revise(generation_id: str, payload: RevisionInput, request: Request, db: Ses
     user = require_user(request, db)
     generation = _get_generation(db, generation_id)
     try:
-        new_gen = regenerate_generation(db, generation, user)
+        new_gen = revise_generation(
+            db,
+            generation,
+            user,
+            {
+                "issue_tags": payload.issue_tags,
+                "description": payload.description,
+                "annotations": [a.model_dump() for a in payload.annotations],
+                "requested_by": str(user.id),
+            },
+        )
     except ValueError as exc:
         db.rollback()
         raise HTTPException(400, str(exc)) from None
-    snapshot = dict(new_gen.rule_snapshot or {})
-    snapshot["revision_feedback"] = {
-        "issue_tags": payload.issue_tags,
-        "description": payload.description,
-        "annotations": [a.model_dump() for a in payload.annotations],
-        "requested_by": str(user.id),
-    }
-    new_gen.rule_snapshot = snapshot
     db.commit()
     return {
         "id": str(new_gen.id),

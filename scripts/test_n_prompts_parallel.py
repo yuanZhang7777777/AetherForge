@@ -168,6 +168,12 @@ def test_gpt55_system_prompt_is_neutral_designer_node() -> None:
     assert "包装/运输/发货信任图" in text
     assert "zh 中文策划必须写清" in text
     assert "final 英文生图提示词必须自包含" in text
+    assert "买家疑问" in text
+    assert "信息模块" in text
+    assert "商品证据" in text
+    assert "画面层级" in text
+    assert "可见文字" in text
+    assert "像一张可直接执行的电商详情页设计稿" in text
     assert "不要编造商品没有的功能" in text
     assert "1–4" not in text
     assert "1-4" not in text

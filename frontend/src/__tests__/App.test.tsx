@@ -499,6 +499,37 @@ test("selects the latest successful version by default for export", async () => 
   expect(screen.getByRole("button", { name: "历史版本 核心卖点图 v1" })).toBeInTheDocument();
 });
 
+test("keeps the previous successful result exportable while a new version is queued", async () => {
+  const queuedProject = {
+    ...project,
+    skus: [{
+      ...project.skus[0],
+      outputs: [
+        { ...outputs[0], id: "generation-1-v1", attempt: 1 },
+        { ...outputs[0], id: "generation-1-v2", attempt: 2, status: "queued", reviewStatus: "pending", imageUrl: undefined },
+        ...outputs.slice(1),
+      ],
+    }],
+  };
+  const fetchMock = stubFetch((url) => {
+    if (url.includes("/csrf/")) return Promise.resolve(response(200, { csrf_token: "csrf-for-test" }));
+    if (url.includes("/export/")) return Promise.resolve({ ok: true, status: 200, blob: async () => new Blob(["zip"]) });
+    return Promise.resolve(response(200, url.includes("/workspace/") ? { projects: [queuedProject] } : queuedProject));
+  });
+  vi.stubGlobal("URL", { createObjectURL: vi.fn(() => "blob:zip"), revokeObjectURL: vi.fn() });
+  vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+  renderApp("/projects/project-demo/results");
+
+  expect(await screen.findByRole("button", { name: "下载选中 ZIP（8 张）" })).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "下载当前图片" })).toHaveAttribute("href", "/api/results/result-1/media/");
+  fireEvent.click(screen.getByRole("button", { name: "下载选中 ZIP（8 张）" }));
+
+  await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/export/"))).toBe(true));
+  const call = fetchMock.mock.calls.find(([url]) => String(url).includes("/export/"));
+  expect(JSON.parse(String(call?.[1]?.body)).generation_ids).toContain("generation-1-v1");
+  expect(JSON.parse(String(call?.[1]?.body)).generation_ids).not.toContain("generation-1-v2");
+});
+
 test("lets operators cancel one result from the ZIP selection", async () => {
   renderApp("/projects/project-demo/results");
 
@@ -631,24 +662,48 @@ test("pauses one active result from the result page", async () => {
   expect(JSON.parse(String(call?.[1]?.body))).toEqual({ generation_ids: ["generation-running"] });
 });
 
-test("shows revision feedback controls without submitting while the feature is in development", async () => {
+test("opens a large revision editor and lets users undo or clear mistaken marks", async () => {
   renderApp("/projects/project-demo/results");
 
-  const button = await screen.findByRole("button", { name: "提交圈选修改" });
-  expect(button).toBeEnabled();
-  expect(screen.getByRole("checkbox", { name: "商品身份" })).toBeInTheDocument();
+  fireEvent.click(await screen.findByRole("button", { name: "修改 标准白底产品图 v1" }));
+
+  expect(await screen.findByRole("dialog", { name: "修改 标准白底产品图 v1" })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "添加圈选标记" }));
+  fireEvent.change(screen.getByLabelText("标记 1 修改说明"), { target: { value: "把这里的文字放大" } });
+  fireEvent.click(screen.getByRole("button", { name: "添加框选标记" }));
+  expect(screen.getByText("标记 2")).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "撤销上一步" }));
+  expect(screen.queryByText("标记 2")).not.toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "清除全部" }));
+  expect(screen.queryByText("标记 1")).not.toBeInTheDocument();
 });
 
-test("clicking result revision submit shows a development notice without calling revise", async () => {
+test("submits result revision annotations to create a new image version", async () => {
   const fetchMock = stubFetch();
   renderApp("/projects/project-demo/results");
 
-  const button = await screen.findByRole("button", { name: "提交圈选修改" });
-  fireEvent.click(screen.getByRole("checkbox", { name: "商品身份" }));
-  fireEvent.click(button);
+  fireEvent.click(await screen.findByRole("button", { name: "修改 标准白底产品图 v1" }));
+  fireEvent.click(await screen.findByRole("button", { name: "添加圈选标记" }));
+  fireEvent.change(screen.getByLabelText("整体修改说明"), { target: { value: "整体文字放大，商品不变" } });
+  fireEvent.change(screen.getByLabelText("标记 1 修改说明"), { target: { value: "把这里的泰文改清晰" } });
+  fireEvent.click(screen.getByRole("checkbox", { name: "Logo / 文字" }));
+  fireEvent.click(screen.getByRole("button", { name: "提交修改生成新版本" }));
 
-  expect(await screen.findByRole("alert")).toHaveTextContent("修改反馈功能正在开发中");
-  expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/revise/"))).toBe(false);
+  await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url) === "/api/generations/generation-1/revise/")).toBe(true));
+  const call = fetchMock.mock.calls.find(([url]) => String(url) === "/api/generations/generation-1/revise/");
+  expect(JSON.parse(String(call?.[1]?.body))).toEqual({
+    issue_tags: ["logo_text"],
+    description: "整体文字放大，商品不变",
+    annotations: [{
+      kind: "circle",
+      rect: [0.42, 0.42, 0.16, 0.16],
+      color: "#e11d48",
+      width: 2,
+      note: "把这里的泰文改清晰",
+    }],
+  });
 });
 
 test("routes production links to the project result page", async () => {

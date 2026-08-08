@@ -271,6 +271,7 @@ class ReviewAnnotation(BaseModel):
     rect: list[float] | None = None
     color: str = ""
     width: float = 1.0
+    note: str = ""
 
 
 class ReviewInput(BaseModel):

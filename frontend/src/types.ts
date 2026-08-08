@@ -284,11 +284,12 @@ export interface ProjectInput {
 }
 
 export interface ReviewAnnotation {
-  kind: "circle" | "stroke";
+  kind: "circle" | "rect" | "stroke";
   points?: number[][];
   rect?: [number, number, number, number];
   color: string;
   width: number;
+  note?: string;
 }
 
 export interface ReviewInput {

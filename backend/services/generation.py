@@ -270,6 +270,24 @@ def regenerate_generation(db: Session, generation: Generation, user: User) -> Ge
     return _create_followup_attempt(db, generation, user)
 
 
+def revise_generation(db: Session, generation: Generation, user: User, feedback: dict) -> Generation:
+    new_gen = _create_followup_attempt(db, generation, user)
+    previous_paths = [asset.storage_path for asset in generation.result_assets if asset.storage_path]
+    if previous_paths:
+        seen = set()
+        refs = []
+        for path in previous_paths + list(new_gen.reference_snapshot or []):
+            if path and path not in seen:
+                seen.add(path)
+                refs.append(path)
+        new_gen.reference_snapshot = refs
+    snapshot = dict(new_gen.rule_snapshot or {})
+    snapshot["revision_feedback"] = feedback
+    new_gen.rule_snapshot = snapshot
+    db.flush()
+    return new_gen
+
+
 def pause_project_work(db: Session, batch: Batch, cluster_ids, generation_ids):
     from ..ids import safe_uuid
     from ..models import Cluster

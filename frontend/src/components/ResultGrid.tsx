@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { exportProject, pauseProject, regenerateGeneration } from "../api";
+import { exportProject, pauseProject, regenerateGeneration, reviseGeneration } from "../api";
 import { ErrorPanel } from "../layout";
 import { displaySlotName } from "../slotDisplay";
-import type { Project, ReviewAnnotation } from "../types";
+import type { Project, ReviewAnnotation, RevisionInput } from "../types";
 import { currentOutputs } from "../workspace";
 
 const issueTags = [
@@ -23,7 +23,11 @@ function circleAt(x: number, y: number): ReviewAnnotation {
   const centerX = clamp(x, radius, 1 - radius);
   const centerY = clamp(y, radius, 1 - radius);
   const round = (value: number) => Number(value.toFixed(4));
-  return { kind: "circle", rect: [round(centerX - radius), round(centerY - radius), round(radius * 2), round(radius * 2)], color: "#e11d48", width: 2 };
+  return { kind: "circle", rect: [round(centerX - radius), round(centerY - radius), round(radius * 2), round(radius * 2)], color: "#e11d48", width: 2, note: "" };
+}
+
+function centeredRect(): ReviewAnnotation {
+  return { kind: "rect", rect: [0.32, 0.32, 0.36, 0.28], color: "#e11d48", width: 2, note: "" };
 }
 
 function contentBox(bounds: DOMRect | undefined, image: HTMLImageElement | null) {
@@ -54,6 +58,19 @@ function markerPosition(annotation: ReviewAnnotation, bounds: DOMRect | undefine
   return { left: `${box.left + (x + width / 2) * box.width}px`, top: `${box.top + (y + height / 2) * box.height}px` };
 }
 
+function markerBox(annotation: ReviewAnnotation, bounds: DOMRect | undefined, image: HTMLImageElement | null) {
+  if (!annotation.rect) return undefined;
+  const box = contentBox(bounds, image);
+  if (!box) return undefined;
+  const [x, y, width, height] = annotation.rect;
+  return {
+    left: `${box.left + x * box.width}px`,
+    top: `${box.top + y * box.height}px`,
+    width: `${width * box.width}px`,
+    height: `${height * box.height}px`,
+  };
+}
+
 function downloadName(...parts: string[]) {
   const base = parts.join("_").replace(/[<>:"/\\|?*\x00-\x1f]+/g, "").replace(/\s+/g, "_").replace(/_+/g, "_").replace(/^_+|_+$/g, "");
   return `${base || "image"}.png`;
@@ -61,11 +78,17 @@ function downloadName(...parts: string[]) {
 
 export function ResultGrid({ project }: { project: Project }) {
   const queryClient = useQueryClient();
-  const latestBySku = useMemo(() => project.skus.map((sku) => ({ sku, latest: currentOutputs(sku.outputs) })), [project]);
-  const completed = latestBySku.flatMap(({ latest }) => latest.filter((output) => output.status === "completed" && output.imageUrl));
+  const latestBySku = useMemo(() => project.skus.map((sku) => ({
+    sku,
+    latest: currentOutputs(sku.outputs),
+    latestCompleted: currentOutputs(sku.outputs.filter((output) => output.status === "completed" && output.imageUrl)),
+  })), [project]);
+  const allOutputs = useMemo(() => project.skus.flatMap((sku) => sku.outputs), [project]);
+  const completed = latestBySku.flatMap(({ latestCompleted }) => latestCompleted);
   const completedKey = completed.map((output) => output.id).join("|");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set(completed.map((output) => output.id)));
   const [selectedOutputId, setSelectedOutputId] = useState("");
+  const [revisionTargetId, setRevisionTargetId] = useState("");
   const [description, setDescription] = useState("");
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [annotations, setAnnotations] = useState<ReviewAnnotation[]>([]);
@@ -73,8 +96,10 @@ export function ResultGrid({ project }: { project: Project }) {
   const [lightbox, setLightbox] = useState<{ url: string; name: string } | null>(null);
   const canvas = useRef<HTMLButtonElement>(null);
   const image = useRef<HTMLImageElement>(null);
-  const selectedOutput = completed.find((output) => output.id === selectedOutputId) ?? completed[0];
+  const selectedOutput = allOutputs.find((output) => output.id === selectedOutputId) ?? completed[0];
+  const revisionTarget = allOutputs.find((output) => output.id === revisionTargetId);
   const selectedOutputName = selectedOutput ? displaySlotName(selectedOutput) : "";
+  const revisionTargetName = revisionTarget ? displaySlotName(revisionTarget) : "";
 
   useEffect(() => {
     setSelectedIds(new Set(completed.map((output) => output.id)));
@@ -104,6 +129,17 @@ export function ResultGrid({ project }: { project: Project }) {
     },
   });
   const regenerate = useMutation({ mutationFn: regenerateGeneration, onSuccess: invalidate });
+  const revise = useMutation({
+    mutationFn: ({ generationId, input }: { generationId: string; input: RevisionInput }) => reviseGeneration(generationId, input),
+    onSuccess: async () => {
+      setRevisionTargetId("");
+      setDescription("");
+      setSelectedTags([]);
+      setAnnotations([]);
+      setRevisionNotice("");
+      await invalidate();
+    },
+  });
   const pause = useMutation({
     mutationFn: (generationId: string) => pauseProject(project.id, { generationIds: [generationId] }),
     onMutate: (generationId) => {
@@ -124,6 +160,30 @@ export function ResultGrid({ project }: { project: Project }) {
     return next;
   });
   const addAnnotation = (annotation: ReviewAnnotation | null) => { if (annotation) setAnnotations((current) => [...current, annotation]); };
+  const updateAnnotationNote = (index: number, note: string) => {
+    setAnnotations((current) => current.map((annotation, itemIndex) => itemIndex === index ? { ...annotation, note } : annotation));
+  };
+  const openRevision = (output: NonNullable<typeof selectedOutput>) => {
+    setSelectedOutputId(output.id);
+    setRevisionTargetId(output.id);
+    setDescription("");
+    setSelectedTags([]);
+    setAnnotations([]);
+    setRevisionNotice("");
+  };
+  const submitRevision = () => {
+    if (!revisionTarget) return;
+    const cleanDescription = description.trim();
+    const cleanAnnotations = annotations.map((annotation) => ({ ...annotation, note: annotation.note?.trim() ?? "" }));
+    if (!cleanDescription && !selectedTags.length && !cleanAnnotations.some((annotation) => annotation.note)) {
+      setRevisionNotice("请先填写整体修改说明、标记说明或选择问题标签。");
+      return;
+    }
+    revise.mutate({
+      generationId: revisionTarget.id,
+      input: { issue_tags: selectedTags, description: cleanDescription, annotations: cleanAnnotations },
+    });
+  };
   const onKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
     if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
@@ -176,6 +236,7 @@ export function ResultGrid({ project }: { project: Project }) {
                     )}
                     <div className="mt-3 flex flex-wrap gap-2">
                       {(output.status === "completed" || output.status === "failed") && <button className="text-sm font-semibold text-indigo-700 disabled:text-slate-400" disabled={regenerate.isPending} onClick={() => regenerate.mutate(output.id)}>再生成 {outputName}</button>}
+                      {output.status === "completed" && output.imageUrl && <button className="text-sm font-semibold text-indigo-700 disabled:text-slate-400" disabled={revise.isPending} onClick={() => openRevision(output)}>修改 {outputName} v{output.attempt}</button>}
                       {["queued", "running"].includes(output.status) && <button className="text-sm font-semibold text-amber-700 disabled:text-slate-400" disabled={pause.isPending} onClick={() => pause.mutate(output.id)}>暂停 {outputName}</button>}
                       {history.map((item) => <button className="text-sm text-slate-500" key={item.id} onClick={() => setSelectedOutputId(item.id)}>历史版本 {displaySlotName(item)} v{item.attempt}</button>)}
                     </div>
@@ -206,38 +267,86 @@ export function ResultGrid({ project }: { project: Project }) {
         </button>
         {selectedOutput && (
           <section className="mt-6 border-t border-slate-200 pt-5">
-            <p className="section-label">圈选修改</p>
-            <h3 className="mt-1 font-semibold">当前修改：{selectedOutputName}</h3>
-            <button ref={canvas} type="button" aria-label="在结果图上添加问题圈选" onClick={(event) => addAnnotation(normalizedCircle(event, image.current))} onKeyDown={onKeyDown} className="review-canvas mt-4 min-h-64 border-0 text-left">
-              {selectedOutput.imageUrl ? <img ref={image} src={selectedOutput.imageUrl} alt={`当前${selectedOutputName}结果图`} loading="lazy" decoding="async" /> : <span>结果图预览</span>}
-              {annotations.map((annotation, index) => annotation.rect ? <i key={`${annotation.rect[0]}-${annotation.rect[1]}-${index}`} className="review-mark" style={markerPosition(annotation, canvas.current?.getBoundingClientRect(), image.current)}>{index + 1}</i> : null)}
-            </button>
+            <p className="section-label">当前图片</p>
+            <h3 className="mt-1 font-semibold">{selectedOutputName} v{selectedOutput.attempt}</h3>
+            <div className="mt-4 overflow-hidden rounded-2xl bg-slate-100">
+              {selectedOutput.imageUrl ? <img src={selectedOutput.imageUrl} alt={`当前${selectedOutputName}结果图`} className="w-full object-contain" loading="lazy" decoding="async" /> : <p className="p-6 text-sm text-slate-500">结果图预览</p>}
+            </div>
+            {selectedOutput.status === "completed" && selectedOutput.imageUrl && (
+              <button className="secondary-button mt-3 w-full" disabled={revise.isPending} onClick={() => openRevision(selectedOutput)}>修改当前图片</button>
+            )}
+            {selectedOutput.imageUrl && (
+              <a className="secondary-button mt-2 w-full" href={selectedOutput.imageUrl} download={downloadName(project.name, selectedOutputName, `v${selectedOutput.attempt}`)}>下载当前图片</a>
+            )}
             {selectedOutput.prompt && (
               <label className="mt-4 block text-sm font-medium text-slate-700">
                 <span className="mb-2 block">生成提示词</span>
                 <textarea className="min-h-40 text-xs leading-5" readOnly value={selectedOutput.prompt} />
               </label>
             )}
-            <fieldset className="mt-4">
-              <legend className="text-sm font-medium text-slate-700">问题标签</legend>
-              <div className="mt-2 grid grid-cols-2 gap-2">
-                {issueTags.map(([value, label]) => (
-                  <label className="flex items-center gap-2 text-sm text-slate-700" key={value}>
-                    <input type="checkbox" checked={selectedTags.includes(value)} onChange={() => setSelectedTags((tags) => tags.includes(value) ? tags.filter((tag) => tag !== value) : [...tags, value])} />
-                    {label}
-                  </label>
-                ))}
-              </div>
-            </fieldset>
-            <label className="mt-4 block text-sm font-medium text-slate-700">
-              <span className="mb-2 block">修改说明</span>
-              <textarea value={description} onChange={(event) => setDescription(event.target.value)} />
-            </label>
-            {revisionNotice && <p className="mt-3 rounded-xl bg-indigo-50 px-3 py-2 text-sm font-semibold text-indigo-700" role="alert">{revisionNotice}</p>}
-            <button className="secondary-button mt-3 w-full" onClick={() => setRevisionNotice("修改反馈功能正在开发中")}>提交圈选修改</button>
           </section>
         )}
       </aside>
+      {revisionTarget && (
+        <div className="fixed inset-0 z-[80] overflow-y-auto bg-slate-950/70 p-4 md:p-8" role="dialog" aria-modal="true" aria-label={`修改 ${revisionTargetName} v${revisionTarget.attempt}`}>
+          <section className="mx-auto max-w-6xl rounded-2xl bg-white p-4 shadow-2xl md:p-6">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="section-label">图片修改</p>
+                <h2 className="mt-1 text-xl font-semibold">修改 {revisionTargetName} v{revisionTarget.attempt}</h2>
+              </div>
+              <button className="secondary-button" type="button" onClick={() => setRevisionTargetId("")}>关闭修改</button>
+            </div>
+            <div className="mt-5 grid gap-5 lg:grid-cols-[minmax(0,1fr)_340px]">
+              <section>
+                <button ref={canvas} type="button" aria-label="在结果图上添加问题圈选" onClick={(event) => addAnnotation(normalizedCircle(event, image.current))} onKeyDown={onKeyDown} className="review-canvas border-0 text-left">
+                  {revisionTarget.imageUrl ? <img ref={image} src={revisionTarget.imageUrl} alt={`${revisionTargetName}待修改结果图`} /> : <span>结果图预览</span>}
+                  {annotations.map((annotation, index) => annotation.rect ? (
+                    <span key={`${annotation.kind}-${index}`}>
+                      <span className={`review-area review-area-${annotation.kind}`} style={markerBox(annotation, canvas.current?.getBoundingClientRect(), image.current)} />
+                      <i className="review-mark" style={markerPosition(annotation, canvas.current?.getBoundingClientRect(), image.current)}>{index + 1}</i>
+                    </span>
+                  ) : null)}
+                </button>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button className="secondary-button" type="button" onClick={() => addAnnotation(circleAt(0.5, 0.5))}>添加圈选标记</button>
+                  <button className="secondary-button" type="button" onClick={() => addAnnotation(centeredRect())}>添加框选标记</button>
+                  <button className="secondary-button" type="button" disabled={!annotations.length} onClick={() => setAnnotations((current) => current.slice(0, -1))}>撤销上一步</button>
+                  <button className="secondary-button" type="button" disabled={!annotations.length} onClick={() => setAnnotations([])}>清除全部</button>
+                </div>
+              </section>
+              <aside>
+                <fieldset>
+                  <legend className="text-sm font-medium text-slate-700">问题标签</legend>
+                  <div className="mt-2 grid grid-cols-2 gap-2">
+                    {issueTags.map(([value, label]) => (
+                      <label className="flex items-center gap-2 text-sm text-slate-700" key={value}>
+                        <input type="checkbox" checked={selectedTags.includes(value)} onChange={() => setSelectedTags((tags) => tags.includes(value) ? tags.filter((tag) => tag !== value) : [...tags, value])} />
+                        {label}
+                      </label>
+                    ))}
+                  </div>
+                </fieldset>
+                <label className="mt-4 block text-sm font-medium text-slate-700">
+                  <span className="mb-2 block">整体修改说明</span>
+                  <textarea aria-label="整体修改说明" value={description} onChange={(event) => setDescription(event.target.value)} placeholder="例如：整体文字放大，商品不变，只优化右下角卖点说明" />
+                </label>
+                <div className="mt-4 space-y-3">
+                  {annotations.map((annotation, index) => (
+                    <label className="block rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm font-medium text-slate-700" key={`${annotation.kind}-${index}`}>
+                      <span className="mb-2 block">标记 {index + 1}</span>
+                      <textarea aria-label={`标记 ${index + 1} 修改说明`} value={annotation.note ?? ""} onChange={(event) => updateAnnotationNote(index, event.target.value)} placeholder="说明这个标记区域要怎么改" />
+                    </label>
+                  ))}
+                </div>
+                {revisionNotice && <p className="mt-3 rounded-xl bg-indigo-50 px-3 py-2 text-sm font-semibold text-indigo-700" role="alert">{revisionNotice}</p>}
+                {revise.isError && <div className="mt-3"><ErrorPanel error={revise.error} retry={submitRevision} /></div>}
+                <button className="primary-button mt-4 w-full" type="button" disabled={revise.isPending} onClick={submitRevision}>{revise.isPending ? "提交中…" : "提交修改生成新版本"}</button>
+              </aside>
+            </div>
+          </section>
+        </div>
+      )}
       {lightbox && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-900/85 p-6" role="dialog" aria-modal="true" aria-label={`${lightbox.name} 放大查看`} onClick={() => setLightbox(null)}>
           <button className="absolute right-4 top-4 text-sm font-semibold text-white" onClick={() => setLightbox(null)}>关闭</button>
