@@ -238,9 +238,9 @@ export function PromptEditor({
   const editablePrompts = draft.prompts.filter((prompt) => !prompt.readOnly);
   const hasSourcePassthrough = editablePrompts.length < draft.prompts.length;
   const promptSectionTitle = `${editablePrompts.length} 张生成提示词`;
-  const progressLabel = promptStage ? `正在生成 ${editablePrompts.length} 张提示词` : "正在读取并理解商品图片";
+  const progressLabel = promptStage ? `正在生成 ${editablePrompts.length} 张提示词` : "正在预备生成";
   const promptPlaceholder = (displayOrder: number) => preparing && !promptStage
-    ? "商品图片识别完成后，会自动生成提示词"
+    ? "预备生成完成后，会自动生成提示词"
     : preparing
       ? "正在生成这个槽位的提示词"
       : prepared

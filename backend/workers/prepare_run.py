@@ -18,10 +18,13 @@ def run_prepare_job(cluster_id: str, claimed_revision: int) -> None:
         cluster = db.get(Cluster, cluster_id)
         if cluster is None or cluster.preparation_status != "preparing":
             return
-        ok = run_cluster_preparation(db, cluster)
+        ok = run_cluster_preparation(db, cluster, claimed_revision=claimed_revision)
         current_revision = int((cluster.analysis_snapshot or {}).get("_preparation_revision", 0))
         edited_during_run = current_revision != claimed_revision
         if edited_during_run:
+            if cluster.preparation_status not in {"pending", "preparing"}:
+                db.commit()
+                return
             # 处理期间被编辑（无论成败）→ 重新排队，让最新配置重跑
             cluster.preparation_status = "pending"
             cluster.preparation_stage = "queued"

@@ -188,6 +188,19 @@ test("uses placeholders instead of editable fake prompt text before preparation"
   expect(screen.getByLabelText("09 品质信任图提示词")).toHaveValue("");
 });
 
+test("uses generic preparation wording before prompt generation starts", () => {
+  render(<PromptEditor sku={{
+    ...sku,
+    preparationStatus: "pending",
+    preparation: { status: "pending", stage: "queued", current: 0, total: 3, error: "" },
+    prompts: [],
+  }} onSave={() => undefined} />);
+
+  expect(screen.getByText(/正在预备生成/)).toBeInTheDocument();
+  expect(screen.queryByText(/正在读取并理解商品图片/)).not.toBeInTheDocument();
+  expect((screen.getByLabelText("02 核心卖点图提示词") as HTMLTextAreaElement).placeholder).toContain("预备生成完成后");
+});
+
 test("autosaves edited prompts as a structured snake-case array", async () => {
   const fetchMock = vi.fn()
     .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ csrf_token: "csrf" }) })

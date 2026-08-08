@@ -67,8 +67,8 @@ export default function ProjectGrouping() {
       ...current,
       skus: current.skus.map((sku) => ids.has(sku.id) ? {
         ...sku,
-        preparationStatus: "preparing",
-        preparation: { status: "preparing", stage: "N1", current: 0, total: 3, error: "" },
+        preparationStatus: "pending",
+        preparation: { status: "pending", stage: "queued", current: 0, total: 3, error: "" },
       } : sku),
     } : current);
   };
@@ -83,8 +83,8 @@ export default function ProjectGrouping() {
       status: "queued",
       skus: current.skus.map((sku) => ids.has(sku.id) ? {
         ...sku,
-        preparationStatus: sku.preparationStatus === "ready" ? sku.preparationStatus : "preparing",
-        preparation: sku.preparationStatus === "ready" ? sku.preparation : { status: "preparing", stage: "N1", current: 0, total: 3, error: "" },
+        preparationStatus: sku.preparationStatus === "ready" ? sku.preparationStatus : "pending",
+        preparation: sku.preparationStatus === "ready" ? sku.preparation : { status: "pending", stage: "queued", current: 0, total: 3, error: "" },
         generationProgress: { status: "queued", current: 0, completed: 0, active: 1, failed: 0, total: totalBySku.get(sku.id) ?? 9 },
       } : sku),
     } : current);

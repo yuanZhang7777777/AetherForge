@@ -199,6 +199,8 @@ test("prepares only selected products through the explicit preparation endpoint"
   fireEvent.click(await screen.findByRole("checkbox", { name: "选择 折叠椅" }));
   fireEvent.click(screen.getByRole("button", { name: "预备生成（1）" }));
 
+  expect(await screen.findByText("正在预备生成 · 排队中")).toBeInTheDocument();
+  expect(screen.queryByText("正在识别商品 · 10%")).not.toBeInTheDocument();
   await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url) === "/api/projects/project-1/prepare/")).toBe(true));
   const call = fetchMock.mock.calls.find(([url]) => String(url) === "/api/projects/project-1/prepare/");
   expect(JSON.parse(String(call?.[1]?.body))).toEqual({ cluster_ids: ["one"] });

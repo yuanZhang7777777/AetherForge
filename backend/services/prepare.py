@@ -12,6 +12,7 @@ import uuid
 from contextlib import ExitStack
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..config import settings
@@ -48,8 +49,27 @@ class PreparationFailed(RuntimeError):
     pass
 
 
-def _set_stage(db: Session, cluster: Cluster, stage: str, current: int) -> None:
+class PreparationCanceled(RuntimeError):
+    pass
+
+
+def _ensure_claim_current(db: Session, cluster: Cluster, claimed_revision: int | None) -> None:
+    if claimed_revision is None:
+        return
+    row = db.execute(
+        select(Cluster.preparation_status, Cluster.analysis_snapshot).where(Cluster.id == cluster.id)
+    ).first()
+    if row is None:
+        raise PreparationCanceled()
+    status, analysis = row
+    current_revision = int((analysis or {}).get("_preparation_revision", 0))
+    if status not in {"pending", "preparing"} or current_revision != claimed_revision:
+        raise PreparationCanceled()
+
+
+def _set_stage(db: Session, cluster: Cluster, stage: str, current: int, claimed_revision: int | None = None) -> None:
     """推进阶段并提交，让前端 progress 轮询能看到 N1→N3 实时进度。"""
+    _ensure_claim_current(db, cluster, claimed_revision)
     cluster.preparation_status = "preparing"
     cluster.preparation_stage = stage
     cluster.preparation_current = current
@@ -57,10 +77,14 @@ def _set_stage(db: Session, cluster: Cluster, stage: str, current: int) -> None:
     db.commit()
 
 
-def run_cluster_preparation(db: Session, cluster: Cluster, actor_id=None) -> bool:
+def run_cluster_preparation(db: Session, cluster: Cluster, actor_id=None, claimed_revision: int | None = None) -> bool:
     """同步执行 prepare 管线。成功 → READY 并写 fingerprint；失败 → FAILED + error。"""
     try:
-        _prepare(db, cluster, actor_id)
+        _prepare(db, cluster, actor_id, claimed_revision)
+    except PreparationCanceled:
+        db.rollback()
+        db.refresh(cluster)
+        return False
     except PreparationFailed as exc:
         db.rollback()
         cluster.preparation_status = "failed"
@@ -80,8 +104,7 @@ def run_cluster_preparation(db: Session, cluster: Cluster, actor_id=None) -> boo
     return True
 
 
-def _prepare(db: Session, cluster: Cluster, actor_id) -> None:
-    _set_stage(db, cluster, "N1", 1)
+def _prepare(db: Session, cluster: Cluster, actor_id, claimed_revision: int | None = None) -> None:
     # 冻结本组设计的平台/国家，避免 prepare 或生成中途被改设置，导致同一套图语言/风格混杂
     frozen_site = _site(cluster)
     analysis = dict(cluster.analysis_snapshot or {})
@@ -89,7 +112,7 @@ def _prepare(db: Session, cluster: Cluster, actor_id) -> None:
     cluster.analysis_snapshot = analysis
 
     if settings.prompt_pipeline_mode in {"gpt55_single", "apimart_single"}:
-        _prepare_single_gpt55(db, cluster, frozen_site, actor_id)
+        _prepare_single_gpt55(db, cluster, frozen_site, actor_id, claimed_revision)
         return
 
     # 名称+补充信息都填全 → 跳过 N1 视觉识别（省一次 APIMart 调用，不覆盖用户填写）；
@@ -97,13 +120,14 @@ def _prepare(db: Session, cluster: Cluster, actor_id) -> None:
     if cluster.batch.ai_recognition_enabled and not (
         (cluster.product_name or "").strip() and (cluster.product_facts or "").strip()
     ):
+        _set_stage(db, cluster, "N1", 1, claimed_revision)
         _n1_vision_fill(db, cluster)
         _merge_recognition(db, cluster)
 
     _n2_identity_lock(db, cluster)
     _n3_fact_ledger(cluster)
 
-    _set_stage(db, cluster, "N2", 2)
+    _set_stage(db, cluster, "N2", 2, claimed_revision)
     style_brief, prompts = _n_prompts(db, cluster, frozen_site)
     analysis = dict(cluster.analysis_snapshot or {})
     analysis["marketing_plan"] = {"plans": [], "style_brief": style_brief}
@@ -113,13 +137,13 @@ def _prepare(db: Session, cluster: Cluster, actor_id) -> None:
     if not created:
         raise PreparationFailed("没有可生成的营销槽位")
 
-    _set_stage(db, cluster, "N3", 3)
+    _set_stage(db, cluster, "N3", 3, claimed_revision)
     _n3_readiness(db, cluster)
 
 
-def _prepare_single_gpt55(db: Session, cluster: Cluster, site: str, actor_id) -> None:
+def _prepare_single_gpt55(db: Session, cluster: Cluster, site: str, actor_id, claimed_revision: int | None = None) -> None:
     """单节点 prepare：GPT-5.5 一次看图并输出 identity/style/prompts。"""
-    _set_stage(db, cluster, "N2", 2)
+    _set_stage(db, cluster, "N2", 2, claimed_revision)
     style_brief, prompts, node = _gpt55_single_node(db, cluster, site)
     _merge_single_node_identity(cluster, node)
     _n3_fact_ledger(cluster)
@@ -137,7 +161,7 @@ def _prepare_single_gpt55(db: Session, cluster: Cluster, site: str, actor_id) ->
     if not created:
         raise PreparationFailed("GPT-5.5 未返回可生成的营销槽位")
 
-    _set_stage(db, cluster, "N3", 3)
+    _set_stage(db, cluster, "N3", 3, claimed_revision)
     _n3_readiness(db, cluster)
 
 
