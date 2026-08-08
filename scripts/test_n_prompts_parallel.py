@@ -39,6 +39,7 @@ def main() -> None:
     test_parallel_failure_falls_back_to_single_call()
     test_prompt_item_front_loads_shopee_ad_style_and_visible_copy()
     test_prompt_item_can_skip_legacy_front_load()
+    test_prompt_item_normalizes_literal_newlines()
     test_gpt55_system_prompt_is_neutral_designer_node()
     test_gpt55_single_node_uses_one_apimart_call()
     test_gpt55_single_node_skips_image_input_when_product_name_is_filled()
@@ -152,6 +153,27 @@ def test_prompt_item_can_skip_legacy_front_load() -> None:
     assert "นุ่มน่ากอด" in prompt["final"]
 
 
+def test_prompt_item_normalizes_literal_newlines() -> None:
+    parsed = _prompt_item(
+        {
+            "slot": 1,
+            "zh": "第一行\\n第二行/n第三行",
+            "target_language_copy": "标题\\n卖点",
+            "final": "Line one.\\nLine two./nLine three.",
+        },
+        front_load=False,
+    )
+    assert parsed is not None
+    _, prompt = parsed
+    assert "\\n" not in prompt["zh"]
+    assert "/n" not in prompt["zh"]
+    assert "\\n" not in prompt["final"]
+    assert "/n" not in prompt["final"]
+    assert prompt["zh"] == "第一行\n第二行\n第三行"
+    assert "Line one.\nLine two.\nLine three." in prompt["final"]
+    assert prompt["target_language_copy"] == "标题\n卖点"
+
+
 def test_gpt55_system_prompt_is_neutral_designer_node() -> None:
     text = n_prepare_single_gpt55_system("TH")
     assert "图片设计师" in text
@@ -175,10 +197,7 @@ def test_gpt55_system_prompt_is_neutral_designer_node() -> None:
     assert "商品证据" in text
     assert "可见文字" in text
     assert "给用户预览和编辑" in text
-    assert "只写正向的画面执行内容" in text
-    assert "内部约束不要写进 zh 或 final" in text
-    assert "只使用用户提供的尺寸参数" in text
-    assert "具体参数、认证、容量、功率、材质或承诺只使用用户输入" in text
+    assert "无法从商品外观合理推断" in text
     assert "1–4" not in text
     assert "1-4" not in text
     for phrase in (

@@ -31,7 +31,7 @@ from ..prompts import (
 from ..providers import APIMartClient, DeepSeekClient, extract_json
 from ..storage import get_storage
 from .contract import preparation_fingerprint
-from .prompt_compile import _facts, _person_policy, _site, persist_prompts_direct
+from .prompt_compile import _facts, _normalize_prompt_text, _person_policy, _site, persist_prompts_direct
 from .template import global_fallback_template, template_slots
 
 STAGES = ["N1", "N2", "N3"]
@@ -525,13 +525,13 @@ def _prompt_item(item, expected_slot: int | None = None, *, front_load: bool = T
         return None
     if expected_slot is not None and slot != expected_slot:
         return None
-    final = str(item.get("final") or item.get("prompt") or "").strip()
+    final = _normalize_prompt_text(item.get("final") or item.get("prompt"))
     if slot < 1 or not final:
         return None
-    target_copy = str(item.get("target_language_copy") or "").strip()
+    target_copy = _normalize_prompt_text(item.get("target_language_copy"))
     return slot, {
         "final": _front_load_shopee_prompt(final, target_copy) if front_load else _ensure_visible_copy(final, target_copy),
-        "zh": str(item.get("zh") or "").strip(),
+        "zh": _normalize_prompt_text(item.get("zh")),
         "target_language_copy": target_copy,
     }
 

@@ -8,6 +8,11 @@ from .serialize import _effective_config
 from .template import global_fallback_template, template_slots
 
 
+def _normalize_prompt_text(value) -> str:
+    """模型有时会把换行输出成字面量 \\n 或 /n，入库前统一成真实换行。"""
+    return str(value or "").replace("\\n", "\n").replace("/n", "\n").strip()
+
+
 def _facts(cluster: Cluster) -> list[str]:
     """商品卡补充信息优先，非空则覆盖项目级风格/要求提示词；空则用项目级兜底。
 
@@ -140,11 +145,11 @@ def persist_prompts_direct(
     created: list[PromptVersion] = []
     for slot in slots:
         item = prompts.get(slot.order) or {}
-        text = str(item.get("final") or "").strip()
+        text = _normalize_prompt_text(item.get("final"))
         if not text:
             raise ValueError(f"写提示词缺失槽位 {slot.order}（{slot.name}），请重新预备生成")
-        zh = str(item.get("zh") or "").strip()
-        target_language_copy = str(item.get("target_language_copy") or "").strip()
+        zh = _normalize_prompt_text(item.get("zh"))
+        target_language_copy = _normalize_prompt_text(item.get("target_language_copy"))
         structured = _structured_output(
             {"target_language_copy": target_language_copy},
             display_prompt=zh,
@@ -208,7 +213,7 @@ def edit_prompt_text(
             final_text,
             _structured_output(
                 {"target_language_copy": structured.get("target_language_copy") or {}},
-                display_prompt=str(new_zh or "").strip(),
+                display_prompt=_normalize_prompt_text(new_zh),
                 zh_edited=True,
             ),
             node_name="user_edit",
@@ -219,7 +224,7 @@ def edit_prompt_text(
         db,
         cluster,
         slot,
-        prompt_text.strip(),
+        _normalize_prompt_text(prompt_text),
         _structured_output({"english_prompt": prompt_text, "target_language_copy": {}}),
         node_name="user_edit",
         actor_id=actor_id,

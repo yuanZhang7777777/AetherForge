@@ -18,6 +18,7 @@ from ..config import settings
 from ..db import SessionLocal
 from ..models import Batch, Generation, ResultAsset
 from ..providers import APIMartClient, DeepSeekClient, ProviderError
+from ..services.prompt_compile import _normalize_prompt_text
 from ..prompts import n5_simplify_prompt, retranslate_final_prompt, retranslate_final_user
 from ..storage import get_storage
 
@@ -184,7 +185,7 @@ def _simplify_prompt(db: Session, gen: Generation) -> bool:
             max_tokens=4096,
         )
         node = result["json"]
-        english = str(node.get("english_prompt") or "").strip()
+        english = _normalize_prompt_text(node.get("english_prompt"))
         if english:
             gen.prompt_text = english
     except (ProviderError, ValueError, KeyError) as exc:
@@ -216,7 +217,7 @@ def _retranslate(db: Session, gen: Generation) -> bool:
             thinking=False,
         )
         node = result["json"]
-        english = str(node.get("final") or "").strip() if isinstance(node, dict) else ""
+        english = _normalize_prompt_text(node.get("final")) if isinstance(node, dict) else ""
         if not english:
             gen.failure_reason = "中文提示词翻译返回为空"
             return False
