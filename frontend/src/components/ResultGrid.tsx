@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type MouseEvent, type PointerEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type PointerEvent } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { exportProject, pauseProject, regenerateGeneration, reviseGeneration } from "../api";
 import { ErrorPanel } from "../layout";
@@ -37,7 +37,6 @@ function normalizedPoint(event: PointerEvent<HTMLElement> | MouseEvent<HTMLEleme
   if (!box) return null;
   const x = (event.clientX - bounds.left - box.left) / box.width;
   const y = (event.clientY - bounds.top - box.top) / box.height;
-  if (x < 0 || x > 1 || y < 0 || y > 1) return null;
   return { x: clamp(x, 0, 1), y: clamp(y, 0, 1) };
 }
 
@@ -242,7 +241,7 @@ export function ResultGrid({ project }: { project: Project }) {
   };
 
   return (
-    <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
+    <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
       <section className="space-y-5">
         {latestBySku.map(({ sku, latest }) => {
           const completedCount = latest.filter((output) => output.status === "completed").length;
@@ -281,15 +280,33 @@ export function ResultGrid({ project }: { project: Project }) {
                           <input className="size-4" type="checkbox" checked={selectedIds.has(output.id)} onChange={() => toggle(output.id)} />
                           导出 {outputName} v{output.attempt}
                         </label>
-                        <a className="font-semibold text-indigo-700" href={output.imageUrl} download={downloadName(project.name, sku.name, outputName, `v${output.attempt}`)}>下载 {outputName} v{output.attempt}</a>
+                        <a className="result-action" href={output.imageUrl} download={downloadName(project.name, sku.name, outputName, `v${output.attempt}`)}>下载 {outputName} v{output.attempt}</a>
                       </div>
                     )}
                     <div className="mt-3 flex flex-wrap gap-2">
-                      {(output.status === "completed" || output.status === "failed") && <button className="text-sm font-semibold text-indigo-700 disabled:text-slate-400" disabled={regenerate.isPending} onClick={() => regenerate.mutate(output.id)}>再生成 {outputName}</button>}
-                      {output.status === "completed" && output.imageUrl && <button className="text-sm font-semibold text-indigo-700 disabled:text-slate-400" disabled={revise.isPending} onClick={() => openRevision(output)}>修改 {outputName} v{output.attempt}</button>}
-                      {["queued", "running"].includes(output.status) && <button className="text-sm font-semibold text-amber-700 disabled:text-slate-400" disabled={pause.isPending} onClick={() => pause.mutate(output.id)}>暂停 {outputName}</button>}
-                      {history.map((item) => <button className="text-sm text-slate-500" key={item.id} onClick={() => setSelectedOutputId(item.id)}>历史版本 {displaySlotName(item)} v{item.attempt}</button>)}
+                      {(output.status === "completed" || output.status === "failed") && <button className="result-action" disabled={regenerate.isPending} onClick={() => regenerate.mutate(output.id)}>再生成 {outputName}</button>}
+                      {output.status === "completed" && output.imageUrl && <button className="result-action" disabled={revise.isPending} onClick={() => openRevision(output)}>修改 {outputName} v{output.attempt}</button>}
+                      {["queued", "running"].includes(output.status) && <button className="result-action result-action-warning" disabled={pause.isPending} onClick={() => pause.mutate(output.id)}>暂停 {outputName}</button>}
                     </div>
+                    {history.length > 0 && (
+                      <div className="mt-4">
+                        <p className="text-xs font-semibold text-slate-500">历史版本</p>
+                        <div className="version-fan" aria-label={`${outputName}历史版本`}>
+                          {history.slice(0, 5).map((item, index) => (
+                            <button
+                              aria-label={`查看历史版本 ${displaySlotName(item)} v${item.attempt}`}
+                              className="version-card"
+                              key={item.id}
+                              onClick={() => setSelectedOutputId(item.id)}
+                              style={{ "--version-index": index } as CSSProperties}
+                            >
+                              {item.imageUrl ? <img src={item.imageUrl} alt={`${displaySlotName(item)} v${item.attempt} 历史图`} loading="lazy" decoding="async" /> : <span>{item.status}</span>}
+                              <small>v{item.attempt}</small>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </article>
                 );
               })}
@@ -298,7 +315,7 @@ export function ResultGrid({ project }: { project: Project }) {
           );
         })}
       </section>
-      <aside className="surface h-fit p-5">
+      <aside className="surface h-fit p-5 xl:sticky xl:top-24">
         <h2 className="font-semibold">选择式 ZIP</h2>
         <p className="mt-2 text-sm text-slate-500">默认勾选每个槽位最新成功图。</p>
         {zip.isError && <ErrorPanel error={zip.error} retry={() => zip.mutate()} />}

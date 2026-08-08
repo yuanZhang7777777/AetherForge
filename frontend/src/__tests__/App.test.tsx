@@ -520,7 +520,10 @@ test("selects the latest successful version by default for export", async () => 
 
   const latest = await screen.findByRole("checkbox", { name: "导出 核心卖点图 v2" });
   expect(latest).toBeChecked();
-  expect(screen.getByRole("button", { name: "历史版本 核心卖点图 v1" })).toBeInTheDocument();
+  expect(screen.getByText("历史版本")).toBeInTheDocument();
+  expect(screen.getByRole("img", { name: "核心卖点图 v1 历史图" })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "查看历史版本 核心卖点图 v1" }));
+  expect(screen.getByRole("heading", { name: "核心卖点图 v1" })).toBeInTheDocument();
 });
 
 test("keeps the previous successful result exportable while a new version is queued", async () => {

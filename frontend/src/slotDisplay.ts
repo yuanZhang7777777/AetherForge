@@ -2,6 +2,7 @@ import type { OutputImage } from "./types";
 
 const slotNameMap: Record<string, string> = {
   "Seller original product photo": "原始商品图",
+  "Shopee high-CTR main poster": "主图",
   "Standard white-background product hero": "标准白底产品图",
   "Standard white background product hero": "标准白底产品图",
   "Key benefit": "核心卖点图",
