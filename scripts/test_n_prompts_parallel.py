@@ -27,7 +27,7 @@ class FakeDeepSeek:
         return {
             "json": {
                 "slot": slot,
-                "zh": f"槽位 {slot} 中文策划",
+                "zh": f"槽位 {slot} 中文生图提示词",
                 "final": f"Slot {slot} final prompt. The reference product has exactly one body.",
                 "target_language_copy": f"文案 {slot}",
             }
@@ -64,7 +64,7 @@ def test_parallel_slot_generation() -> None:
 
     assert style_brief == "统一奶油白摄影风格"
     assert sorted(prompts) == [1, 2, 3]
-    assert prompts[2]["zh"] == "槽位 2 中文策划"
+    assert prompts[2]["zh"] == "槽位 2 中文生图提示词"
     assert prompts[3]["target_language_copy"] == "文案 3"
     assert len(client.calls) == 4, client.calls
     slot_calls = client.calls[1:]
@@ -87,7 +87,7 @@ def test_parallel_failure_falls_back_to_single_call() -> None:
                     "prompts": [
                         {
                             "slot": 1,
-                            "zh": "旧路径中文策划",
+                            "zh": "旧路径中文生图提示词",
                             "final": "Fallback final prompt. The reference product has exactly one body.",
                             "target_language_copy": "旧路径文案",
                         }
@@ -113,7 +113,7 @@ def test_parallel_failure_falls_back_to_single_call() -> None:
         prepare_module.DeepSeekClient = original_client
 
     assert style_brief == "旧路径统一风格"
-    assert prompts[1]["zh"] == "旧路径中文策划"
+    assert prompts[1]["zh"] == "旧路径中文生图提示词"
     assert len(fake_client.calls) == 2
 
 
@@ -173,10 +173,12 @@ def test_gpt55_system_prompt_is_neutral_designer_node() -> None:
     assert "买家疑问" in text
     assert "信息任务" in text
     assert "商品证据" in text
-    assert "画面层级" not in text
     assert "可见文字" in text
     assert "给用户预览和编辑" in text
-    assert "无法从商品外观合理推断" in text
+    assert "只写正向的画面执行内容" in text
+    assert "内部约束不要写进 zh 或 final" in text
+    assert "只使用用户提供的尺寸参数" in text
+    assert "具体参数、认证、容量、功率、材质或承诺只使用用户输入" in text
     assert "1–4" not in text
     assert "1-4" not in text
     for phrase in (

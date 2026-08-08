@@ -7,7 +7,7 @@
 1. ERP 或本地账号登录，前端通过 `/api/csrf/` 获取 CSRF token。
 2. 创建项目，选择平台、国家、图片比例、分辨率和项目风格提示词。
 3. 导入图片/文件夹或 ERP SKU；SKU 导入会用当前登录会话里的 ERP token 拉商品名和图片；每个项目最多保留 100 张有效商品图片。
-4. 预备生成：默认 legacy 链路保留 N1 可选视觉识别 + N2 分槽提示词；生产可切 `PROMPT_PIPELINE_MODE=gpt55_single`，用 APIMart GPT-5.5 单节点一次完成识别、身份锁、`style_brief` 和 9 张图提示词。当前单节点实际调用 `backend/prompts.py::n_prepare_single_gpt55_system()`；只有「AI 识别开启且商品名称为空」时才把参考图传给该提示词节点，用户已填商品名称时只传文本信息。
+4. 预备生成：默认 legacy 链路保留 N1 可选视觉识别 + N2 分槽提示词；生产可切 `PROMPT_PIPELINE_MODE=gpt55_single`，用 APIMart 单节点一次完成识别、身份锁、`style_brief` 和 9 张图提示词。当前单节点实际调用 `backend/prompts.py::n_prepare_single_gpt55_system()`，提示词模型默认 `gpt-5-nano-2025-08-07`；只有「AI 识别开启且商品名称为空」时才把参考图传给该提示词节点，用户已填商品名称时只传文本信息。
 5. 正式生成：generation-worker 用 gpt-image-2 生图，用户改过中文生图提示词的槽位会在提交前轻量重译英文 prompt；`DEEPSEEK_ENABLED=0` 时轻量文本 JSON 调用走 APIMart prompt 模型。
 6. 结果页查看、双击放大、单图下载、勾选/取消勾选后直接下载选中图片，也保留 ZIP 备用；用户可对单张结果图拖拽添加修改区域、删除单个标记并提交修改，系统为同槽位生成新版本，不覆盖旧图；导出只包含当前项目 owner 的 completed 结果。
 
@@ -44,7 +44,7 @@ docker compose up -d
 
 ## 关键环境变量
 
-- `PROMPT_PIPELINE_MODE=legacy|gpt55_single`：`gpt55_single` 用 APIMart GPT-5.5 一次完成识别+提示词。
+- `PROMPT_PIPELINE_MODE=legacy|gpt55_single`：`gpt55_single` 用 APIMart 单节点一次完成识别+提示词（模式名保留兼容，提示词模型默认 `gpt-5-nano-2025-08-07`）。
 - `DEEPSEEK_ENABLED=1|0`：关闭后不再调用 DeepSeek，文本 JSON 兜底走 APIMart。
 - `DEEPSEEK_API_KEY` / `DEEPSEEK_BASE_URL` / `DEEPSEEK_PROMPT_MODEL`
 - `REASONING_EFFORT_PROMPTS=low`：N2 分槽提示词生成档位。
@@ -61,7 +61,7 @@ docker compose up -d
 ## 底层提示词规则
 
 - 通用提示词只能沉淀跨品类原则：商品身份清晰、买家决策信息明确、身份锁保真、事实不编造、视觉强度按品类自适应。
-- 通用提示词可以沉淀跨品类的电商详情页写法：每张图先回答一个买家疑问，再选择信息任务、商品证据和可见文字；最终给用户编辑的是出图用 final 的中文版中文生图提示词。
+- 通用提示词可以沉淀跨品类的电商详情页写法：每张图先回答一个买家疑问，再选择信息任务、商品证据和可见文字；最终给用户编辑的是出图用 final 的中文版中文生图提示词，内容只写正向画面描述和可见文字，不暴露内部禁令或审核规则。
 - 商品名称、店铺名称、补充信息和图片文字都作为参考信息交给模型自行理解；通用提示词不得写死字段解析、取舍规则或店铺名位置。
 - 不能因为某个单品失败样例，把具体品类、配色、构图、参数、人物或促销词写死进全局通用提示词。
 - 如果确实需要单品类策略，必须单独命名为类目策略或模板，写清适用范围；不得混入全局通用提示词。

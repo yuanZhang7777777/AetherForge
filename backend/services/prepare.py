@@ -1,7 +1,7 @@
 """三节点 prepare 管线：识别 → 写提示词 → 就绪。
 
 N1 视觉识别（可选）：项目开启 ai_recognition_enabled 时运行，识别结果与用户填写对比融合，用户填的优先。
-N2 写提示词：先产出统一风格（style_brief），再按槽位并行产出最终英文提示词 + 中文策划；失败回退旧单次调用。
+N2 写提示词：先产出统一风格（style_brief），再按槽位并行产出最终英文提示词 + 中文生图提示词；失败回退旧单次调用。
 N3 确定性校验 → READY + fingerprint。
 
 确定性步骤（不额外调模型）：identity_lock 身份锁、fact_ledger 事实台账。
@@ -142,7 +142,7 @@ def _prepare(db: Session, cluster: Cluster, actor_id, claimed_revision: int | No
 
 
 def _prepare_single_gpt55(db: Session, cluster: Cluster, site: str, actor_id, claimed_revision: int | None = None) -> None:
-    """单节点 prepare：GPT-5.5 一次看图并输出 identity/style/prompts。"""
+    """单节点 prepare：APIMart 提示词模型一次看图并输出 identity/style/prompts。"""
     _set_stage(db, cluster, "N2", 2, claimed_revision)
     style_brief, prompts, node = _gpt55_single_node(db, cluster, site)
     _merge_single_node_identity(cluster, node)
@@ -159,7 +159,7 @@ def _prepare_single_gpt55(db: Session, cluster: Cluster, site: str, actor_id, cl
 
     created = persist_prompts_direct(db, cluster, prompts, style_brief, actor_id=actor_id)
     if not created:
-        raise PreparationFailed("GPT-5.5 未返回可生成的营销槽位")
+        raise PreparationFailed("APIMart 单节点未返回可生成的营销槽位")
 
     _set_stage(db, cluster, "N3", 3, claimed_revision)
     _n3_readiness(db, cluster)
@@ -458,11 +458,11 @@ def _gpt55_single_node(db: Session, cluster: Cluster, site: str) -> tuple[str, d
         )
     node = result["json"]
     if not isinstance(node, dict):
-        raise PreparationFailed("GPT-5.5 单节点未返回 JSON 对象")
+        raise PreparationFailed("APIMart 单节点未返回 JSON 对象")
     style_brief = str(node.get("style_brief") or "").strip()
     raw = node.get("prompts")
     if not style_brief or not isinstance(raw, list):
-        raise PreparationFailed("GPT-5.5 单节点缺少 style_brief 或 prompts")
+        raise PreparationFailed("APIMart 单节点缺少 style_brief 或 prompts")
     prompts: dict[int, dict] = {}
     for item in raw:
         parsed = _prompt_item(item, front_load=False)
@@ -472,7 +472,7 @@ def _gpt55_single_node(db: Session, cluster: Cluster, site: str) -> tuple[str, d
         prompts[slot] = prompt
     missing = [s["order"] for s in slots if s["order"] not in prompts]
     if missing:
-        raise PreparationFailed(f"GPT-5.5 单节点缺少槽位：{', '.join(map(str, missing))}")
+        raise PreparationFailed(f"APIMart 单节点缺少槽位：{', '.join(map(str, missing))}")
     return style_brief, prompts, node
 
 

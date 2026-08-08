@@ -42,7 +42,7 @@ class Settings:
     apimart_api_key: str = field(default_factory=lambda: os.getenv("APIMART_API_KEY", ""))
     apimart_base_url: str = field(default_factory=lambda: os.getenv("APIMART_BASE_URL", "https://api.apimart.ai/v1").rstrip("/"))
     apimart_vision_model: str = field(default_factory=lambda: os.getenv("APIMART_VISION_MODEL", "gpt-5-nano-2025-08-07"))
-    apimart_prompt_model: str = field(default_factory=lambda: os.getenv("APIMART_PROMPT_MODEL", "gpt-5.5"))
+    apimart_prompt_model: str = field(default_factory=lambda: os.getenv("APIMART_PROMPT_MODEL", "gpt-5-nano-2025-08-07"))
     apimart_prompt_max_output_tokens: int = field(default_factory=lambda: _int(os.getenv("APIMART_PROMPT_MAX_OUTPUT_TOKENS"), 24000))
     apimart_image_model: str = field(default_factory=lambda: os.getenv("APIMART_IMAGE_MODEL", "gpt-image-2"))
 

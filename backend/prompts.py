@@ -569,12 +569,15 @@ def n_prepare_single_gpt55_system(site: str) -> str:
         "- 设计每张图时，可以按商品品类和用户补充信息，自主选择合适的详情图模块，例如：对比图、细节图、功能说明图、产品说明图、尺寸材质图、质检/品质图、客户使用图、使用场景图、包装/运输/发货信任图、口碑/热卖高光图。\n"
         "- 这些详情图模块只是可选表达方式，不是固定模板；可以基于商品外观、品类常识和用户提供的参数做合理功能表达，但不能编造具体数值、认证、销量、评价、物流承诺或售后承诺。\n"
         "- 写每张图前先思考它要解决的购买顾虑或决策问题，但最终必须落成可生成的画面提示词，不要停留在抽象策划。\n"
-        "- 每张图的 zh 必须是 final 的中文版中文生图提示词，给用户预览和编辑；它要直接说明图像模型最终会生成的画面、商品证据、可见文字和保真限制。\n"
+        "- 每张图的 zh 必须是 final 的中文版中文生图提示词，给用户预览和编辑；zh 与 final 描述同一张图，信息一一对应。\n"
+        "- zh 和 final 都只写正向的画面执行内容：商品如何呈现、场景如何布置、卖点如何可视化、画面上出现哪些文字。\n"
+        "- 内部约束不要写进 zh 或 final：不要输出「禁止、不得、不要、无法确认、不能编造、保真限制、事实限制」这类审核句或自我提醒；"
+        "需要表达约束时，改写成正向执行句，例如「使用目标站点语言文案」「展示与参考图一致的商品结构」「只使用用户提供的尺寸参数」。\n"
         "- 买家疑问：这张图要回答消费者下单前的哪个疑问，例如是什么、适合谁、怎么用、好在哪里、细节是否可信、尺寸是否合适、收到什么、是否值得买。\n"
         "- 信息任务：选择最适合该疑问的电商表达方式，可用但不限于卖点解释、局部放大、引线标注、前后对比、场景演示、步骤拆解、尺寸材质、配件清单、品质信任；表达方式由商品和事实决定，不固定套用。\n"
         "- 商品证据：明确写出画面里用哪些可见商品结构、材质、配件、包装、使用动作、场景道具或用户补充信息来证明卖点；没有证据的内容不要写。\n"
         "- 可见文字：写出适合目标站点语言的短标题、短卖点或标注文字；文字要像电商详情页里的销售说明，不要空泛品牌口号。\n"
-        "- final 英文生图提示词必须自包含，像交给设计师执行的详情页出图 brief：商品身份、画面目标、信息表达方式、可见卖点、商品证据、可见文字和保真限制都要说清楚。\n\n"
+        "- final 英文生图提示词必须自包含，像交给设计师执行的详情页出图 brief：商品身份、画面目标、信息表达方式、可见卖点、商品证据和可见文字都要说清楚。\n\n"
         "# 需要生成的 9 张图\n"
         + _n_prompts_slots_text_adaptive()
         + "\n"
@@ -584,7 +587,7 @@ def n_prepare_single_gpt55_system(site: str) -> str:
         "- 每张图服务不同购买决策。\n"
         "- 图像风格由商品本身、品类、目标平台和用户补充信息决定。\n"
         "- 不要套用固定模板。\n"
-        "- 不要编造用户未提供且无法从商品外观合理推断的具体参数、认证、容量、功率、材质或承诺。\n\n"
+        "- 具体参数、认证、容量、功率、材质或承诺只使用用户输入、图片可见信息或品类常识能合理支持的内容。\n\n"
         + _site_rules(site, local)
         + "\n\n"
         "# 输出格式\n"
@@ -640,7 +643,7 @@ def _n_prompts_slots_text() -> str:
 
 
 def _n_prompts_slots_text_adaptive() -> str:
-    """GPT-5.5 单节点用：只列 9 图类型，不描述画面表现。"""
+    """APIMart 单节点用：只列 9 图类型，不描述画面表现。"""
     return (
         "1. 主图\n"
         "2. 核心卖点图\n"
@@ -694,27 +697,26 @@ def retranslate_final_prompt(site: str) -> str:
         + _site_rules(site, local)
         + "\n\n"
         "# 输出的 final 必须按固定 5 段组织\n"
-        "1. IDENTITY: 复述身份锁关键不变量，写死硬约束句 `The reference product has exactly N [component]`"
-        "（部件与数量必须与身份锁一致），加 `Keep exactly this verified component count and arrangement.`。"
-        "IDENTITY 段只复述身份锁中明确给出的信息，禁止自行补充未给定的部件外观细节，不得虚构。\n"
+        "1. IDENTITY: 用英文复述身份锁关键不变量，包含句子 `The reference product has exactly N [component]`"
+        "（部件与数量来自身份锁），加 `Keep exactly this verified component count and arrangement.`。"
+        "IDENTITY 段只使用身份锁中明确给出的商品事实。\n"
         "2. REAL USE RELATIONSHIP: 若中文生图提示词含人物，描述人物与商品的真实使用关系（动作、接触方式、部位）；"
         "否则跳过此段。\n"
         "3. COMPOSITION: 依据中文生图提示词的画面、氛围、光线、道具、配色，翻译成有画面感的英文——"
-        "明确景别、机位、角度、背景、场景、道具、光线、配色、质感；整件商品必须可辨认；禁止平淡描述。\n"
-        "4. TEXT RENDERING: 把传入的当地语文案**原样逐字**嵌入这一段，不得翻译、不得转写、不得改写成英文；"
+        "明确景别、机位、角度、背景、场景、道具、光线、配色、质感，并让整件商品保持清晰可辨。\n"
+        "4. TEXT RENDERING: 把传入的当地语文案**原样逐字**嵌入这一段，保持当地语言字符和拼写；"
         "字符必须完全一致（泰文就是泰文，逐字符保留）。同时要求图像模型把文字设计成与场景情绪相配的醒目排版"
         "（合适的粗细、大小、颜色、半透明底条/阴影/描边/强调色），保证清晰可读。写法："
         "`Render the following text exactly, each line appears exactly once, in <语言>; "
         "every character must be glyph-accurate for <语言>, spelled correctly; "
         "design the typography to fit the scene's mood — choose suitable weight, size, color, "
         "optional translucent banner, drop shadow, outline or accent color so the text is bold, "
-        "high-contrast and readable, integrated as part of the composition; do not add label words:` "
+        "high-contrast and readable, integrated as part of the composition; render only these visible text lines:` "
         "后接当地语文案的每一行。\n"
-        "5. EMPHASIS: 强调点（卖点视觉化、本地风格、无乱码、无水印）。\n"
-        "final 是用户中文生图提示词的英文执行版：COMPOSITION/REAL USE 段必须逐项来自中文生图提示词（不得省略、"
-        "不得新增中文生图提示词未写的画面元素）；IDENTITY 段以传入的身份锁/商品事实为准（中文里的身份要点"
-        "若与身份锁冲突，以身份锁为准，商品本体不得改动）。\n"
-        "硬性要求：不得添加身份锁之外的部件；不得改变精确数量；当地语文案必须原样逐字出现，禁止翻译或改写。"
+        "5. EMPHASIS: 强调点（卖点视觉化、本地风格、文字清晰、商业图片质感）。\n"
+        "final 是用户中文生图提示词的英文执行版：COMPOSITION/REAL USE 段逐项对应中文生图提示词；"
+        "IDENTITY 段以传入的身份锁/商品事实为准，让商品本体、部件数量、排列和当地语文案保持一致。\n"
+        "final 本身只写正向执行句，不写审核规则、禁令句或自我提醒。"
     )
 
 

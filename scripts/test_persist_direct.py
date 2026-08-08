@@ -68,7 +68,7 @@ def main() -> None:
                     f"The reference product has exactly one main body, one liner and one lid; "
                     f'colors match the reference image. Show exact visible text: "พร้อมใช้" (slot {order}).'
                 ),
-                "zh": f"槽位 {order} 中文策划：保持奶白机身，呈现真实使用场景。",
+                "zh": f"槽位 {order} 中文生图提示词：保持奶白机身，呈现真实使用场景。",
                 "target_language_copy": f"พร้อมใช้ slot {order}",
             }
             for order in range(1, 10)
@@ -86,7 +86,7 @@ def main() -> None:
             assert pv.prompt_text.strip(), f"槽位 {order} prompt 为空"
             assert pv.node_name == "prompt_writer", f"槽位 {order} node_name={pv.node_name}"
             assert pv.structured_output.get("node_output", {}).get("display_prompt") == prompts[order]["zh"], (
-                f"槽位 {order} display_prompt 应等于中文策划"
+                f"槽位 {order} display_prompt 应等于中文生图提示词"
             )
             assert pv.structured_output.get("target_language_copy") == prompts[order]["target_language_copy"]
             assert pv.output_slot.name == SLOT_NAMES.get(order, pv.output_slot.name)
