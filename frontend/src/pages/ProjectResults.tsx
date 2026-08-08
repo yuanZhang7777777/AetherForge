@@ -15,7 +15,7 @@ export default function ProjectResults() {
       <PageHeading
         eyebrow={project.name}
         title="生产与结果"
-        action={<Link className="secondary-button" to={`/projects/${project.id}`}>返回项目工作区</Link>}
+        action={<Link className="secondary-button fixed right-4 top-4 z-50 md:right-8" to={`/projects/${project.id}`}>返回项目工作区</Link>}
       />
       <ResultGrid project={project} />
     </Shell>

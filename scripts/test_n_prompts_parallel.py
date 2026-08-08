@@ -43,6 +43,7 @@ def main() -> None:
     test_gpt55_system_prompt_is_neutral_designer_node()
     test_gpt55_single_node_uses_one_apimart_call()
     test_gpt55_single_node_skips_image_input_when_product_name_is_filled()
+    test_gpt55_single_node_ignores_import_filename_placeholder_when_ai_recognition_enabled()
     print("PASS: split-slot N2 prompt writer")
 
 
@@ -190,7 +191,8 @@ def test_gpt55_system_prompt_is_neutral_designer_node() -> None:
     assert "详情图模块" in text
     assert "对比图" in text
     assert "包装/运输/发货信任图" in text
-    assert "zh 必须是 final 的中文版中文生图提示词" in text
+    assert "zh 必须是 final 的中文执行版" in text
+    assert "真实使用关系必须成立" in text
     assert "final 英文生图提示词必须自包含" in text
     assert "买家疑问" in text
     assert "信息任务" in text
@@ -358,6 +360,68 @@ def test_gpt55_single_node_skips_image_input_when_product_name_is_filled() -> No
         prepare_module.get_storage = original_storage
 
     assert fake_client.calls[0]["kwargs"]["image_sources"] == []
+
+
+def test_gpt55_single_node_ignores_import_filename_placeholder_when_ai_recognition_enabled() -> None:
+    class FakeAPIMart:
+        def __init__(self) -> None:
+            self.calls: list[dict] = []
+
+        def complete_json(self, system: str, user: str, **kwargs):
+            self.calls.append({"system": system, "user": user, "kwargs": kwargs})
+            return {
+                "json": {
+                    "identity": {},
+                    "identity_lock": "",
+                    "style_brief": "按图片识别商品后设计",
+                    "prompts": [{
+                        "slot": 1,
+                        "zh": "根据参考图识别商品后生成主图。",
+                        "final": "Create a product image from the provided reference photo.",
+                        "target_language_copy": "สินค้า",
+                    }],
+                }
+            }
+
+    class FakeStorage:
+        def local_path(self, storage_path: str):
+            class Context:
+                def __enter__(self):
+                    return "local-product-image.png"
+
+                def __exit__(self, exc_type, exc, tb):
+                    return False
+
+            return Context()
+
+    fake_client = FakeAPIMart()
+    original_client = prepare_module.APIMartClient
+    original_storage = prepare_module.get_storage
+    prepare_module.APIMartClient = lambda: fake_client
+    prepare_module.get_storage = lambda: FakeStorage()
+    try:
+        filename = "048cfa0fe33135b550c94ed37223d04c.jpg"
+        cluster = SimpleNamespace(
+            name=filename,
+            product_name="",
+            store_name="xuecheng",
+            product_facts="",
+            identity_lock="",
+            analysis_snapshot={},
+            cluster_assets=[SimpleNamespace(asset=SimpleNamespace(kind="image", storage_path="assets/front.png"))],
+            batch=SimpleNamespace(
+                ai_recognition_enabled=True,
+                output_template=SimpleNamespace(slots=[SimpleNamespace(order=1, name="Shopee high-CTR main poster", id="slot-1")]),
+                global_prompt="",
+            ),
+        )
+        _gpt55_single_node(None, cluster, "TH")
+    finally:
+        prepare_module.APIMartClient = original_client
+        prepare_module.get_storage = original_storage
+
+    assert "用户填写商品名称：(未填写，按图片识别)" in fake_client.calls[0]["user"]
+    assert fake_client.calls[0]["kwargs"]["image_sources"] == ["local-product-image.png"]
 
 
 if __name__ == "__main__":

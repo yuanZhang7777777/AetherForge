@@ -140,6 +140,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  window.localStorage.clear();
   cleanup();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
@@ -617,6 +618,21 @@ test("lets operators cancel one result from the ZIP selection", async () => {
   expect(screen.getByRole("button", { name: "下载选中 ZIP（7 张）" })).toBeInTheDocument();
 });
 
+test("remembers result export selection for the project", async () => {
+  const view = renderApp("/projects/project-demo/results");
+
+  const first = await screen.findByRole("checkbox", { name: "导出 标准白底产品图 v1" });
+  fireEvent.click(first);
+  expect(first).not.toBeChecked();
+  view.unmount();
+
+  renderApp("/projects/project-demo/results");
+
+  const restored = await screen.findByRole("checkbox", { name: "导出 标准白底产品图 v1" });
+  expect(restored).not.toBeChecked();
+  expect(screen.getByRole("button", { name: "下载选中图片（7 张）" })).toBeInTheDocument();
+});
+
 test("posts only selected generation IDs when downloading the ZIP", async () => {
   const fetchMock = stubFetch((url) => {
     if (url.includes("/csrf/")) return Promise.resolve(response(200, { csrf_token: "csrf-for-test" }));
@@ -628,7 +644,7 @@ test("posts only selected generation IDs when downloading the ZIP", async () => 
   renderApp("/projects/project-demo/results");
 
   fireEvent.click(await screen.findByRole("checkbox", { name: "导出 标准白底产品图 v1" }));
-  fireEvent.click(screen.getByRole("button", { name: "下载选中 ZIP（7 张）" }));
+  fireEvent.click(await screen.findByRole("button", { name: "下载选中 ZIP（7 张）" }));
 
   await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/export/"))).toBe(true));
   const call = fetchMock.mock.calls.find(([url]) => String(url).includes("/export/"));

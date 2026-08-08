@@ -9,6 +9,7 @@ N3 确定性校验 → READY + fingerprint。
 from __future__ import annotations
 
 import uuid
+import re
 from contextlib import ExitStack
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -37,6 +38,7 @@ from .template import global_fallback_template, template_slots
 STAGES = ["N1", "N2", "N3"]
 
 _FALLBACK_NAME = "名称待确认"
+_IMAGE_FILENAME_RE = re.compile(r"^[^\\/]+\.(?:jpe?g|png|webp|gif|bmp|tiff?)$", re.IGNORECASE)
 _SHOPEE_AD_PREFIX = (
     "Create a high-CTR Shopee Southeast Asia marketplace advertising poster, not a clean studio product photo: "
     "bold oversized headline, dense but hierarchical info modules, promo badges, icons, glowing product outline, "
@@ -118,7 +120,7 @@ def _prepare(db: Session, cluster: Cluster, actor_id, claimed_revision: int | No
     # 名称+补充信息都填全 → 跳过 N1 视觉识别（省一次 APIMart 调用，不覆盖用户填写）；
     # 只缺一项才跑 N1，_merge_recognition 按字段独立只补缺项，永不覆盖用户填写。
     if cluster.batch.ai_recognition_enabled and not (
-        (cluster.product_name or "").strip() and (cluster.product_facts or "").strip()
+        _user_product_name(cluster) and (cluster.product_facts or "").strip()
     ):
         _set_stage(db, cluster, "N1", 1, claimed_revision)
         _n1_vision_fill(db, cluster)
@@ -168,9 +170,13 @@ def _prepare_single_gpt55(db: Session, cluster: Cluster, site: str, actor_id, cl
 # ---------------------------------------------------------------- N1 视觉识别 + 融合
 def _clean_product_name(value) -> str:
     text = str(value or "").strip()
-    if not text or text == _FALLBACK_NAME or "{{" in text:
+    if not text or text == _FALLBACK_NAME or "{{" in text or _IMAGE_FILENAME_RE.match(text):
         return ""
     return text[:200]
+
+
+def _user_product_name(cluster: Cluster) -> str:
+    return _clean_product_name(getattr(cluster, "product_name", ""))
 
 
 def _n1_vision_fill(db: Session, cluster: Cluster) -> None:
@@ -226,7 +232,7 @@ def _merge_recognition(db: Session, cluster: Cluster) -> None:
     """识别结果与用户填写对比融合：用户填的优先级最高，识别仅补齐用户没填的部分。"""
     analysis = dict(cluster.analysis_snapshot or {})
     identity = dict(analysis.get("identity") or {})
-    user_name = (cluster.product_name or "").strip()
+    user_name = _user_product_name(cluster)
     recognized_name = _clean_product_name(identity.get("product_name"))
     recognized_identity = str(identity.get("observed_identity") or "").strip()
     user_facts = (cluster.product_facts or "").strip()
@@ -258,7 +264,7 @@ def _merge_recognition(db: Session, cluster: Cluster) -> None:
 
 # ---------------------------------------------------------------- N2 身份锁（确定性）
 def _n2_identity_lock(db: Session, cluster: Cluster) -> None:
-    name = (cluster.product_name or "").strip()
+    name = _user_product_name(cluster)
     if name:
         lock = f"主商品 {name}：部件、数量、颜色、布局与参考图一致。"
     else:
@@ -302,7 +308,7 @@ def _n_prompts(db: Session, cluster: Cluster, site: str) -> tuple[str, dict[int,
         if s.name != "Seller original product photo"
     ]
     client = DeepSeekClient()
-    product_name = (cluster.product_name or cluster.name or "").strip()
+    product_name = _user_product_name(cluster)
     identity_lock = (cluster.identity_lock or "").strip()
     facts = _facts(cluster)
     person_policy = _person_policy(cluster)
@@ -427,7 +433,7 @@ def _gpt55_single_node(db: Session, cluster: Cluster, site: str) -> tuple[str, d
         for s in template_slots(template)
         if s.name != "Seller original product photo"
     ]
-    product_name = (cluster.product_name or cluster.name or "").strip()
+    product_name = _user_product_name(cluster)
     facts = _facts(cluster)
     person_policy = _person_policy(cluster)
     client = APIMartClient()
@@ -494,12 +500,13 @@ def _merge_single_node_identity(cluster: Cluster, node: dict) -> None:
     )
     recognized_name = _clean_product_name(identity.get("product_name"))
     recognized_identity = str(identity.get("observed_identity") or "").strip()
-    if not (cluster.product_name or "").strip() and recognized_name:
+    current_name = _user_product_name(cluster)
+    if not current_name and recognized_name:
         cluster.product_name = recognized_name
         analysis["product_name"] = recognized_name
         analysis["product_name_source"] = "ai"
-    elif (cluster.product_name or "").strip():
-        identity["product_name"] = cluster.product_name
+    elif current_name:
+        identity["product_name"] = current_name
         analysis["product_name_source"] = "manual"
 
     if not (cluster.product_facts or "").strip() and recognized_identity:

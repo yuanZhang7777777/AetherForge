@@ -5,12 +5,15 @@ serialize_project_progress 输出。媒体 URL 走 /api/assets/{id}/media/ 与 /
 """
 from __future__ import annotations
 
+import re
+
 from sqlalchemy.orm import Session, selectinload
 
 from ..models import Asset, Batch, Cluster, Generation, OutputTemplate, PromptVersion, ResultAsset, SkuImportItem
 from .template import global_fallback_template, template_slots
 
 _FALLBACK_NAME = "名称待确认"
+_IMAGE_FILENAME_RE = re.compile(r"^[^\\/]+\.(?:jpe?g|png|webp|gif|bmp|tiff?)$", re.IGNORECASE)
 
 
 def asset_media_url(asset_id) -> str:
@@ -129,7 +132,7 @@ def _serialize_asset(asset: Asset) -> dict:
 
 def _public_product_name(cluster: Cluster) -> str:
     name = (cluster.product_name or "").strip()
-    if name in {_FALLBACK_NAME, ""} or "{{" in name:
+    if name in {_FALLBACK_NAME, ""} or "{{" in name or _IMAGE_FILENAME_RE.match(name):
         return ""
     return name
 

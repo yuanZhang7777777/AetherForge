@@ -1,11 +1,15 @@
 """每槽提示词：final 英文落 PromptVersion，zh 中文生图提示词放 display_prompt 供用户编辑。"""
 from __future__ import annotations
 
+import re
+
 from sqlalchemy.orm import Session
 
 from ..models import Batch, Cluster, OutputSlot, PromptVersion
 from .serialize import _effective_config
 from .template import global_fallback_template, template_slots
+
+_IMAGE_FILENAME_RE = re.compile(r"^[^\\/]+\.(?:jpe?g|png|webp|gif|bmp|tiff?)$", re.IGNORECASE)
 
 
 def _normalize_prompt_text(value) -> str:
@@ -46,6 +50,8 @@ def _identity(cluster: Cluster) -> str:
     if lock:
         return lock
     name = (cluster.product_name or cluster.name or "").strip()
+    if _IMAGE_FILENAME_RE.match(name):
+        name = ""
     return f"主商品 {name}，部件/数量/颜色与参考图一致，禁止增减。"
 
 

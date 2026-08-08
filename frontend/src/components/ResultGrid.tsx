@@ -72,6 +72,22 @@ function downloadName(...parts: string[]) {
   return `${base || "image"}.png`;
 }
 
+function storedSelection(projectId: string, validIds: Set<string>) {
+  try {
+    const raw = window.localStorage.getItem(`aetherforge:result-selection:${projectId}`);
+    if (raw == null) return null;
+    const saved = JSON.parse(raw);
+    if (!Array.isArray(saved)) return null;
+    return new Set(saved.filter((id) => typeof id === "string" && validIds.has(id)));
+  } catch {
+    return null;
+  }
+}
+
+function restoreSelection(projectId: string, validIds: Set<string>, fallbackIds: string[]) {
+  return storedSelection(projectId, validIds) ?? new Set(fallbackIds);
+}
+
 export function ResultGrid({ project }: { project: Project }) {
   const queryClient = useQueryClient();
   const latestBySku = useMemo(() => project.skus.map((sku) => ({
@@ -80,10 +96,12 @@ export function ResultGrid({ project }: { project: Project }) {
     latestCompleted: currentOutputs(sku.outputs.filter((output) => output.status === "completed" && output.imageUrl)),
   })), [project]);
   const allOutputs = useMemo(() => project.skus.flatMap((sku) => sku.outputs), [project]);
-  const completed = latestBySku.flatMap(({ latestCompleted }) => latestCompleted);
+  const completed = useMemo(() => latestBySku.flatMap(({ latestCompleted }) => latestCompleted), [latestBySku]);
   const allCompleted = useMemo(() => allOutputs.filter((output) => output.status === "completed" && output.imageUrl), [allOutputs]);
   const completedKey = completed.map((output) => output.id).join("|");
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set(completed.map((output) => output.id)));
+  const allCompletedKey = allCompleted.map((output) => output.id).join("|");
+  const selectionStorageKey = `aetherforge:result-selection:${project.id}`;
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => restoreSelection(project.id, new Set(allCompleted.map((output) => output.id)), completed.map((output) => output.id)));
   const [selectedOutputId, setSelectedOutputId] = useState("");
   const [revisionTargetId, setRevisionTargetId] = useState("");
   const [description, setDescription] = useState("");
@@ -96,15 +114,44 @@ export function ResultGrid({ project }: { project: Project }) {
   const canvas = useRef<HTMLDivElement>(null);
   const image = useRef<HTMLImageElement>(null);
   const dragStartRef = useRef<{ x: number; y: number } | null>(null);
+  const previousProjectId = useRef(project.id);
+  const selectionReady = useRef(false);
   const selectedOutput = allOutputs.find((output) => output.id === selectedOutputId) ?? completed[0];
   const revisionTarget = allOutputs.find((output) => output.id === revisionTargetId);
   const selectedOutputName = selectedOutput ? displaySlotName(selectedOutput) : "";
   const revisionTargetName = revisionTarget ? displaySlotName(revisionTarget) : "";
 
   useEffect(() => {
-    setSelectedIds(new Set(completed.map((output) => output.id)));
+    if (!selectionReady.current) {
+      selectionReady.current = true;
+      return;
+    }
+    const validIds = new Set(allCompleted.map((output) => output.id));
+    if (previousProjectId.current !== project.id) {
+      setSelectedIds(restoreSelection(project.id, validIds, completed.map((output) => output.id)));
+      previousProjectId.current = project.id;
+    } else {
+      setSelectedIds(storedSelection(project.id, validIds) ?? new Set(completed.map((output) => output.id)));
+    }
     setSelectedOutputId((current) => completed.some((output) => output.id === current) ? current : completed[0]?.id ?? "");
-  }, [project.id, completedKey]);
+  }, [project.id, completedKey, allCompletedKey]);
+
+  const updateSelectedIds = (updater: Set<string> | ((current: Set<string>) => Set<string>)) => {
+    setSelectedIds((current) => {
+      const next = typeof updater === "function" ? updater(current) : updater;
+      try {
+        window.localStorage.setItem(selectionStorageKey, JSON.stringify(Array.from(next)));
+      } catch {
+        // localStorage may be unavailable in private or locked-down browsers; export still works in-memory.
+      }
+      return next;
+    });
+  };
+
+  useEffect(() => {
+    if (selectedOutputId && allOutputs.some((output) => output.id === selectedOutputId)) return;
+    setSelectedOutputId(completed[0]?.id ?? "");
+  }, [selectedOutputId, completedKey, allOutputs, completed]);
 
   useEffect(() => {
     if (!lightbox) return;
@@ -156,7 +203,7 @@ export function ResultGrid({ project }: { project: Project }) {
     },
     onSuccess: invalidate,
   });
-  const toggle = (id: string) => setSelectedIds((current) => {
+  const toggle = (id: string) => updateSelectedIds((current) => {
     const next = new Set(current);
     if (next.has(id)) next.delete(id);
     else next.add(id);
@@ -326,10 +373,10 @@ export function ResultGrid({ project }: { project: Project }) {
         {regenerate.isError && <ErrorPanel error={regenerate.error} retry={() => { if (selectedOutput) regenerate.mutate(selectedOutput.id); }} />}
         {pause.isError && <ErrorPanel error={pause.error} retry={() => { if (selectedOutput) pause.mutate(selectedOutput.id); }} />}
         <div className="mt-4 grid grid-cols-2 gap-2">
-          <button className="secondary-button justify-center" type="button" onClick={() => setSelectedIds(new Set(allCompleted.map((output) => output.id)))}>
+          <button className="secondary-button justify-center" type="button" onClick={() => updateSelectedIds(new Set(allCompleted.map((output) => output.id)))}>
             勾选全部
           </button>
-          <button className="secondary-button justify-center" type="button" onClick={() => setSelectedIds(new Set())}>
+          <button className="secondary-button justify-center" type="button" onClick={() => updateSelectedIds(new Set())}>
             取消勾选
           </button>
         </div>
