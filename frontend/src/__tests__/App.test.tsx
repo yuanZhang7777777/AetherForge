@@ -94,6 +94,30 @@ function renderApp(path = "/") {
   );
 }
 
+function dragRevisionArea({ left = 100, top = 100, right = 250, bottom = 250 } = {}) {
+  const target = screen.getByLabelText("在结果图上拖拽框选修改区域") as HTMLElement;
+  const bounds = {
+    left: 0,
+    top: 0,
+    width: 500,
+    height: 500,
+    right: 500,
+    bottom: 500,
+    x: 0,
+    y: 0,
+    toJSON: () => ({}),
+  } as DOMRect;
+  target.getBoundingClientRect = () => bounds;
+  const image = target.querySelector("img") as HTMLImageElement | null;
+  if (image) {
+    Object.defineProperty(image, "naturalWidth", { configurable: true, value: 500 });
+    Object.defineProperty(image, "naturalHeight", { configurable: true, value: 500 });
+  }
+  fireEvent.mouseDown(target, { clientX: left, clientY: top });
+  fireEvent.mouseMove(target, { clientX: right, clientY: bottom });
+  fireEvent.mouseUp(target, { clientX: right, clientY: bottom });
+}
+
 async function openImportPanel() {
   await screen.findByRole("region", { name: "添加商品面板" });
 }
@@ -668,13 +692,20 @@ test("opens a large revision editor and lets users undo or clear mistaken marks"
   fireEvent.click(await screen.findByRole("button", { name: "修改 标准白底产品图 v1" }));
 
   expect(await screen.findByRole("dialog", { name: "修改 标准白底产品图 v1" })).toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: "添加圈选标记" }));
+  fireEvent.click(screen.getByRole("button", { name: "添加修改区域" }));
+  expect(screen.queryByText("标记 1")).not.toBeInTheDocument();
+  dragRevisionArea();
   fireEvent.change(screen.getByLabelText("标记 1 修改说明"), { target: { value: "把这里的文字放大" } });
-  fireEvent.click(screen.getByRole("button", { name: "添加框选标记" }));
+  dragRevisionArea({ left: 240, top: 240, right: 420, bottom: 420 });
   expect(screen.getByText("标记 2")).toBeInTheDocument();
 
   fireEvent.click(screen.getByRole("button", { name: "撤销上一步" }));
   expect(screen.queryByText("标记 2")).not.toBeInTheDocument();
+
+  dragRevisionArea({ left: 260, top: 260, right: 440, bottom: 440 });
+  fireEvent.click(screen.getByRole("button", { name: "删除标记 1" }));
+  expect(screen.queryByText("标记 2")).not.toBeInTheDocument();
+  expect(screen.getByText("标记 1")).toBeInTheDocument();
 
   fireEvent.click(screen.getByRole("button", { name: "清除全部" }));
   expect(screen.queryByText("标记 1")).not.toBeInTheDocument();
@@ -685,7 +716,8 @@ test("submits result revision annotations to create a new image version", async 
   renderApp("/projects/project-demo/results");
 
   fireEvent.click(await screen.findByRole("button", { name: "修改 标准白底产品图 v1" }));
-  fireEvent.click(await screen.findByRole("button", { name: "添加圈选标记" }));
+  fireEvent.click(await screen.findByRole("button", { name: "添加修改区域" }));
+  dragRevisionArea();
   fireEvent.change(screen.getByLabelText("整体修改说明"), { target: { value: "整体文字放大，商品不变" } });
   fireEvent.change(screen.getByLabelText("标记 1 修改说明"), { target: { value: "把这里的泰文改清晰" } });
   fireEvent.click(screen.getByRole("checkbox", { name: "Logo / 文字" }));
@@ -697,8 +729,8 @@ test("submits result revision annotations to create a new image version", async 
     issue_tags: ["logo_text"],
     description: "整体文字放大，商品不变",
     annotations: [{
-      kind: "circle",
-      rect: [0.42, 0.42, 0.16, 0.16],
+      kind: "rect",
+      rect: [0.2, 0.2, 0.3, 0.3],
       color: "#e11d48",
       width: 2,
       note: "把这里的泰文改清晰",

@@ -43,7 +43,8 @@
   .review-item span, .review-item small { @apply block; }
   .review-item small { @apply mt-1 text-xs text-slate-400; }
   .review-item-active { @apply bg-indigo-50 text-indigo-700; }
-  .review-canvas { @apply relative grid min-h-96 w-full place-items-center overflow-hidden rounded-2xl bg-slate-200/50; }
+  .review-canvas { @apply relative grid min-h-96 w-full touch-none select-none place-items-center overflow-hidden rounded-2xl bg-slate-200/50; }
+  .review-canvas-drawing { @apply cursor-crosshair ring-2 ring-indigo-400; }
   .review-canvas img { @apply h-full max-h-130 w-full object-contain; }
   .review-area { @apply pointer-events-none absolute border-2 border-rose-500 bg-rose-500/10; }
   .review-area-circle { @apply rounded-full; }

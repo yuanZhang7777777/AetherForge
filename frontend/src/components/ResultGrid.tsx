@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type MouseEvent, type PointerEvent } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { exportProject, pauseProject, regenerateGeneration, reviseGeneration } from "../api";
 import { ErrorPanel } from "../layout";
@@ -13,21 +13,8 @@ const issueTags = [
   ["scene", "场景"],
 ] as const;
 
-const radius = 0.08;
-
 function clamp(value: number, minimum: number, maximum: number) {
   return Math.min(Math.max(value, minimum), maximum);
-}
-
-function circleAt(x: number, y: number): ReviewAnnotation {
-  const centerX = clamp(x, radius, 1 - radius);
-  const centerY = clamp(y, radius, 1 - radius);
-  const round = (value: number) => Number(value.toFixed(4));
-  return { kind: "circle", rect: [round(centerX - radius), round(centerY - radius), round(radius * 2), round(radius * 2)], color: "#e11d48", width: 2, note: "" };
-}
-
-function centeredRect(): ReviewAnnotation {
-  return { kind: "rect", rect: [0.32, 0.32, 0.36, 0.28], color: "#e11d48", width: 2, note: "" };
 }
 
 function contentBox(bounds: DOMRect | undefined, image: HTMLImageElement | null) {
@@ -40,14 +27,31 @@ function contentBox(bounds: DOMRect | undefined, image: HTMLImageElement | null)
   return { left: (bounds.width - width) / 2, top: (bounds.height - height) / 2, width, height };
 }
 
-function normalizedCircle(event: MouseEvent<HTMLButtonElement>, image: HTMLImageElement | null) {
+function round(value: number) {
+  return Number(value.toFixed(4));
+}
+
+function normalizedPoint(event: PointerEvent<HTMLElement> | MouseEvent<HTMLElement>, image: HTMLImageElement | null) {
   const bounds = event.currentTarget.getBoundingClientRect();
   const box = contentBox(bounds, image);
   if (!box) return null;
   const x = (event.clientX - bounds.left - box.left) / box.width;
   const y = (event.clientY - bounds.top - box.top) / box.height;
   if (x < 0 || x > 1 || y < 0 || y > 1) return null;
-  return circleAt(x, y);
+  return { x: clamp(x, 0, 1), y: clamp(y, 0, 1) };
+}
+
+function rectAnnotation(start: { x: number; y: number }, end: { x: number; y: number }): ReviewAnnotation {
+  const x = Math.min(start.x, end.x);
+  const y = Math.min(start.y, end.y);
+  const width = Math.abs(end.x - start.x);
+  const height = Math.abs(end.y - start.y);
+  return { kind: "rect", rect: [round(x), round(y), round(width), round(height)], color: "#e11d48", width: 2, note: "" };
+}
+
+function usefulAnnotation(annotation: ReviewAnnotation | null) {
+  const rect = annotation?.rect;
+  return Boolean(rect && rect[2] >= 0.01 && rect[3] >= 0.01);
 }
 
 function markerPosition(annotation: ReviewAnnotation, bounds: DOMRect | undefined, image: HTMLImageElement | null) {
@@ -92,10 +96,14 @@ export function ResultGrid({ project }: { project: Project }) {
   const [description, setDescription] = useState("");
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [annotations, setAnnotations] = useState<ReviewAnnotation[]>([]);
+  const [drawingEnabled, setDrawingEnabled] = useState(false);
+  const [dragStart, setDragStart] = useState<{ x: number; y: number } | null>(null);
+  const [draftAnnotation, setDraftAnnotation] = useState<ReviewAnnotation | null>(null);
   const [revisionNotice, setRevisionNotice] = useState("");
   const [lightbox, setLightbox] = useState<{ url: string; name: string } | null>(null);
-  const canvas = useRef<HTMLButtonElement>(null);
+  const canvas = useRef<HTMLDivElement>(null);
   const image = useRef<HTMLImageElement>(null);
+  const dragStartRef = useRef<{ x: number; y: number } | null>(null);
   const selectedOutput = allOutputs.find((output) => output.id === selectedOutputId) ?? completed[0];
   const revisionTarget = allOutputs.find((output) => output.id === revisionTargetId);
   const selectedOutputName = selectedOutput ? displaySlotName(selectedOutput) : "";
@@ -136,6 +144,10 @@ export function ResultGrid({ project }: { project: Project }) {
       setDescription("");
       setSelectedTags([]);
       setAnnotations([]);
+      setDrawingEnabled(false);
+      setDragStart(null);
+      dragStartRef.current = null;
+      setDraftAnnotation(null);
       setRevisionNotice("");
       await invalidate();
     },
@@ -159,9 +171,11 @@ export function ResultGrid({ project }: { project: Project }) {
     else next.add(id);
     return next;
   });
-  const addAnnotation = (annotation: ReviewAnnotation | null) => { if (annotation) setAnnotations((current) => [...current, annotation]); };
   const updateAnnotationNote = (index: number, note: string) => {
     setAnnotations((current) => current.map((annotation, itemIndex) => itemIndex === index ? { ...annotation, note } : annotation));
+  };
+  const deleteAnnotation = (index: number) => {
+    setAnnotations((current) => current.filter((_annotation, itemIndex) => itemIndex !== index));
   };
   const openRevision = (output: NonNullable<typeof selectedOutput>) => {
     setSelectedOutputId(output.id);
@@ -169,6 +183,10 @@ export function ResultGrid({ project }: { project: Project }) {
     setDescription("");
     setSelectedTags([]);
     setAnnotations([]);
+    setDrawingEnabled(false);
+    setDragStart(null);
+    dragStartRef.current = null;
+    setDraftAnnotation(null);
     setRevisionNotice("");
   };
   const submitRevision = () => {
@@ -184,11 +202,43 @@ export function ResultGrid({ project }: { project: Project }) {
       input: { issue_tags: selectedTags, description: cleanDescription, annotations: cleanAnnotations },
     });
   };
-  const onKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
-    if (event.key === "Enter" || event.key === " ") {
-      event.preventDefault();
-      addAnnotation(circleAt(0.5, 0.5));
+  const startDrawing = (event: PointerEvent<HTMLDivElement>) => {
+    if (!drawingEnabled) return;
+    const point = normalizedPoint(event, image.current);
+    if (!point) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    dragStartRef.current = point;
+    setDragStart(point);
+    setDraftAnnotation(rectAnnotation(point, point));
+  };
+  const updateDrawing = (event: PointerEvent<HTMLDivElement> | MouseEvent<HTMLDivElement>) => {
+    const start = dragStartRef.current ?? dragStart;
+    if (!drawingEnabled || !start) return;
+    const point = normalizedPoint(event, image.current);
+    if (!point) return;
+    setDraftAnnotation(rectAnnotation(start, point));
+  };
+  const finishDrawing = (event: PointerEvent<HTMLDivElement> | MouseEvent<HTMLDivElement>) => {
+    const start = dragStartRef.current ?? dragStart;
+    if (!drawingEnabled || !start) return;
+    const point = normalizedPoint(event, image.current);
+    const annotation = point ? rectAnnotation(start, point) : draftAnnotation;
+    if (usefulAnnotation(annotation)) {
+      setAnnotations((current) => [...current, annotation as ReviewAnnotation]);
     }
+    dragStartRef.current = null;
+    setDragStart(null);
+    setDraftAnnotation(null);
+  };
+  const startMouseDrawing = (event: MouseEvent<HTMLDivElement>) => {
+    if (!drawingEnabled) return;
+    const point = normalizedPoint(event, image.current);
+    if (!point) return;
+    event.preventDefault();
+    dragStartRef.current = point;
+    setDragStart(point);
+    setDraftAnnotation(rectAnnotation(point, point));
   };
 
   return (
@@ -299,18 +349,28 @@ export function ResultGrid({ project }: { project: Project }) {
             </div>
             <div className="mt-5 grid gap-5 lg:grid-cols-[minmax(0,1fr)_340px]">
               <section>
-                <button ref={canvas} type="button" aria-label="在结果图上添加问题圈选" onClick={(event) => addAnnotation(normalizedCircle(event, image.current))} onKeyDown={onKeyDown} className="review-canvas border-0 text-left">
+                <div
+                  ref={canvas}
+                  aria-label="在结果图上拖拽框选修改区域"
+                  className={`review-canvas ${drawingEnabled ? "review-canvas-drawing" : ""}`}
+                  onPointerDown={startDrawing}
+                  onPointerMove={updateDrawing}
+                  onPointerUp={finishDrawing}
+                  onPointerCancel={() => { dragStartRef.current = null; setDragStart(null); setDraftAnnotation(null); }}
+                  onMouseDown={startMouseDrawing}
+                  onMouseMove={updateDrawing}
+                  onMouseUp={finishDrawing}
+                >
                   {revisionTarget.imageUrl ? <img ref={image} src={revisionTarget.imageUrl} alt={`${revisionTargetName}待修改结果图`} /> : <span>结果图预览</span>}
-                  {annotations.map((annotation, index) => annotation.rect ? (
+                  {[...annotations, ...(draftAnnotation ? [draftAnnotation] : [])].map((annotation, index) => annotation.rect ? (
                     <span key={`${annotation.kind}-${index}`}>
                       <span className={`review-area review-area-${annotation.kind}`} style={markerBox(annotation, canvas.current?.getBoundingClientRect(), image.current)} />
-                      <i className="review-mark" style={markerPosition(annotation, canvas.current?.getBoundingClientRect(), image.current)}>{index + 1}</i>
+                      {index < annotations.length && <i className="review-mark" style={markerPosition(annotation, canvas.current?.getBoundingClientRect(), image.current)}>{index + 1}</i>}
                     </span>
                   ) : null)}
-                </button>
+                </div>
                 <div className="mt-3 flex flex-wrap gap-2">
-                  <button className="secondary-button" type="button" onClick={() => addAnnotation(circleAt(0.5, 0.5))}>添加圈选标记</button>
-                  <button className="secondary-button" type="button" onClick={() => addAnnotation(centeredRect())}>添加框选标记</button>
+                  <button className={drawingEnabled ? "primary-button" : "secondary-button"} type="button" onClick={() => setDrawingEnabled((current) => !current)}>添加修改区域</button>
                   <button className="secondary-button" type="button" disabled={!annotations.length} onClick={() => setAnnotations((current) => current.slice(0, -1))}>撤销上一步</button>
                   <button className="secondary-button" type="button" disabled={!annotations.length} onClick={() => setAnnotations([])}>清除全部</button>
                 </div>
@@ -333,10 +393,13 @@ export function ResultGrid({ project }: { project: Project }) {
                 </label>
                 <div className="mt-4 space-y-3">
                   {annotations.map((annotation, index) => (
-                    <label className="block rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm font-medium text-slate-700" key={`${annotation.kind}-${index}`}>
-                      <span className="mb-2 block">标记 {index + 1}</span>
+                    <article className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm font-medium text-slate-700" key={`${annotation.kind}-${index}`}>
+                      <div className="mb-2 flex items-center justify-between gap-2">
+                        <span>标记 {index + 1}</span>
+                        <button className="text-xs font-semibold text-rose-700" type="button" onClick={() => deleteAnnotation(index)}>删除标记 {index + 1}</button>
+                      </div>
                       <textarea aria-label={`标记 ${index + 1} 修改说明`} value={annotation.note ?? ""} onChange={(event) => updateAnnotationNote(index, event.target.value)} placeholder="说明这个标记区域要怎么改" />
-                    </label>
+                    </article>
                   ))}
                 </div>
                 {revisionNotice && <p className="mt-3 rounded-xl bg-indigo-50 px-3 py-2 text-sm font-semibold text-indigo-700" role="alert">{revisionNotice}</p>}
