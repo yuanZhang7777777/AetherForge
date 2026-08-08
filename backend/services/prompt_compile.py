@@ -1,4 +1,4 @@
-"""每槽提示词：final 英文落 PromptVersion，zh 中文策划放 display_prompt 供用户编辑。"""
+"""每槽提示词：final 英文落 PromptVersion，zh 中文生图提示词放 display_prompt 供用户编辑。"""
 from __future__ import annotations
 
 from sqlalchemy.orm import Session
@@ -131,7 +131,7 @@ def persist_prompts_direct(
 ) -> list[PromptVersion]:
     """把写提示词节点产出的双语提示词落 PromptVersion（lang=en）。
 
-    prompts 为 {slot_order: {"final": 英文出图提示词, "zh": 中文策划, "target_language_copy": 当地语文案}}；
+    prompts 为 {slot_order: {"final": 英文出图提示词, "zh": final 的中文版中文生图提示词, "target_language_copy": 当地语文案}}；
     prompt_text 存 final（worker 未编辑时原样提交），display_prompt 存 zh（可编辑）。
     缺失槽位直接报错，避免静默产出劣质图。
     """
@@ -182,7 +182,7 @@ def edit_prompt_text(
 
     双语路径（该槽最新版本有 display_prompt）：
     - 调用方传 display_prompt → 保留 final 英文 prompt_text，只更新中文 display_prompt 并标记 zh_edited=True；
-      生成时由 generation-worker 按新中文重译 final。
+      生成时由 generation-worker 按新中文生图提示词重译 final。
     - 只传 prompt（兼容旧前端）→ 它发的其实是中文，同样走中文更新路径。
     Legacy 路径（无 display_prompt）→ 维持现状直接覆盖 prompt_text（英文直编）。
     """

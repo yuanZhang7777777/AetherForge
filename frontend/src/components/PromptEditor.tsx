@@ -24,7 +24,7 @@ const stagePercent: Record<string, number> = {
 type PromptDraftItem = {
   slotOrder: number;
   slot: string;
-  text: string; // 可编辑内容：双语=中文策划，legacy=最终英文
+  text: string; // 可编辑内容：双语=中文生图提示词，legacy=最终英文
   finalText: string; // 出图用最终英文（双语模式只读展示）
   hasDisplay: boolean; // 是否为双语（服务器有 displayPrompt）
   readOnly: boolean;
@@ -304,9 +304,9 @@ export function PromptEditor({
             return (
             <div className="space-y-2" key={prompt.slotOrder}>
               <label className="block text-sm font-medium text-slate-700">
-                <span className="mb-2 block">{label}{prompt.hasDisplay ? " · 中文策划" : ""}</span>
+                <span className="mb-2 block">{label}{prompt.hasDisplay ? " · 中文生图提示词" : ""}</span>
                 <textarea
-                  aria-label={`${label}${prompt.hasDisplay ? "中文策划" : ""}`}
+                  aria-label={`${label}${prompt.hasDisplay ? "中文生图提示词" : ""}`}
                   disabled={prompt.readOnly}
                   placeholder={prompt.text.trim() ? "" : promptPlaceholder(displayOrder)}
                   value={prompt.text}

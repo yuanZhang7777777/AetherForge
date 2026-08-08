@@ -55,7 +55,7 @@ def _build_generation(
         structured = {}
     rule_snapshot: dict = {"prompt_lang": structured.get("lang", "en")}
     if structured.get("zh_edited"):
-        # 用户改过中文策划：生成时由 generation-worker 按最新中文重译 final，
+        # 用户改过中文生图提示词：生成时由 generation-worker 按最新中文重译 final，
         # 快照重译所需输入（身份锁/事实/当地语文案/站点）。
         rule_snapshot["zh_edited"] = True
         rule_snapshot["zh"] = str(structured.get("display_prompt") or "").strip()
@@ -274,13 +274,7 @@ def revise_generation(db: Session, generation: Generation, user: User, feedback:
     new_gen = _create_followup_attempt(db, generation, user)
     previous_paths = [asset.storage_path for asset in generation.result_assets if asset.storage_path]
     if previous_paths:
-        seen = set()
-        refs = []
-        for path in previous_paths + list(new_gen.reference_snapshot or []):
-            if path and path not in seen:
-                seen.add(path)
-                refs.append(path)
-        new_gen.reference_snapshot = refs
+        new_gen.reference_snapshot = list(dict.fromkeys(previous_paths))
     snapshot = dict(new_gen.rule_snapshot or {})
     snapshot["revision_feedback"] = feedback
     new_gen.rule_snapshot = snapshot

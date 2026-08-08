@@ -112,26 +112,16 @@ def _revision_prompt_text(base_prompt: str, feedback: dict | None) -> str:
     if not isinstance(feedback, dict):
         return base_prompt
     description = str(feedback.get("description") or "").strip()
-    tags = ", ".join(str(tag) for tag in feedback.get("issue_tags") or [] if str(tag).strip())
     annotations = [
         item for item in feedback.get("annotations") or []
         if isinstance(item, dict)
     ]
-    lines = [
-        "IMAGE EDITING REVISION TASK",
-        "Use the first reference image as the previous generated result to edit from.",
-        "Use the other reference images only to preserve the original product identity.",
-        "Keep the same product, composition, ecommerce layout, aspect ratio, and successful design elements.",
-        "Only change the parts requested by the user. Do not redesign unrelated areas.",
-    ]
-    if tags:
-        lines.append(f"Issue tags: {tags}.")
+    lines = ["Edit the provided image according to the user's request."]
     if description:
-        lines.append(f"Global edit request: {description}")
+        lines.append(description)
     if annotations:
-        lines.append("Marked regions:")
+        lines.append("Marked areas:")
         lines.extend(_annotation_line(item, index) for index, item in enumerate(annotations, start=1))
-    lines.extend(["", "Original generation prompt:", base_prompt])
     return "\n".join(lines)
 
 
@@ -209,7 +199,7 @@ def _simplify_prompt(db: Session, gen: Generation) -> bool:
 
 
 def _retranslate(db: Session, gen: Generation) -> bool:
-    """用户改过中文策划：按最新中文重译出最终英文 final，覆盖本次提交用，不落库。"""
+    """用户改过中文生图提示词：按最新中文重译出最终英文 final，覆盖本次提交用，不落库。"""
     snapshot = gen.rule_snapshot or {}
     try:
         result = _prompt_json_client().complete_json(
@@ -292,7 +282,7 @@ def _attempt(db: Session, gen: Generation, client: APIMartClient) -> None:
             gen.status = "failed"
             gen.failure_reason = "提示词已过期（旧版中文），请重新预备生成"
             return
-        # 用户改过中文策划 → 生成时重译成无歧义英文 final（当地语文案逐字保留），仅本次提交用、不落库
+        # 用户改过中文生图提示词 → 生成时重译成无歧义英文 final（当地语文案逐字保留），仅本次提交用、不落库
         if gen.rule_snapshot.get("zh_edited"):
             if not _retranslate(db, gen):
                 gen.status = "failed"

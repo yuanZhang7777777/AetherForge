@@ -6,13 +6,6 @@ import { displaySlotName } from "../slotDisplay";
 import type { Project, ReviewAnnotation, RevisionInput } from "../types";
 import { currentOutputs } from "../workspace";
 
-const issueTags = [
-  ["identity", "商品身份"],
-  ["logo_text", "Logo / 文字"],
-  ["composition", "构图"],
-  ["scene", "场景"],
-] as const;
-
 function clamp(value: number, minimum: number, maximum: number) {
   return Math.min(Math.max(value, minimum), maximum);
 }
@@ -88,12 +81,12 @@ export function ResultGrid({ project }: { project: Project }) {
   })), [project]);
   const allOutputs = useMemo(() => project.skus.flatMap((sku) => sku.outputs), [project]);
   const completed = latestBySku.flatMap(({ latestCompleted }) => latestCompleted);
+  const allCompleted = useMemo(() => allOutputs.filter((output) => output.status === "completed" && output.imageUrl), [allOutputs]);
   const completedKey = completed.map((output) => output.id).join("|");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set(completed.map((output) => output.id)));
   const [selectedOutputId, setSelectedOutputId] = useState("");
   const [revisionTargetId, setRevisionTargetId] = useState("");
   const [description, setDescription] = useState("");
-  const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [annotations, setAnnotations] = useState<ReviewAnnotation[]>([]);
   const [drawingEnabled, setDrawingEnabled] = useState(false);
   const [dragStart, setDragStart] = useState<{ x: number; y: number } | null>(null);
@@ -141,7 +134,6 @@ export function ResultGrid({ project }: { project: Project }) {
     onSuccess: async () => {
       setRevisionTargetId("");
       setDescription("");
-      setSelectedTags([]);
       setAnnotations([]);
       setDrawingEnabled(false);
       setDragStart(null);
@@ -180,7 +172,6 @@ export function ResultGrid({ project }: { project: Project }) {
     setSelectedOutputId(output.id);
     setRevisionTargetId(output.id);
     setDescription("");
-    setSelectedTags([]);
     setAnnotations([]);
     setDrawingEnabled(false);
     setDragStart(null);
@@ -192,13 +183,21 @@ export function ResultGrid({ project }: { project: Project }) {
     if (!revisionTarget) return;
     const cleanDescription = description.trim();
     const cleanAnnotations = annotations.map((annotation) => ({ ...annotation, note: annotation.note?.trim() ?? "" }));
-    if (!cleanDescription && !selectedTags.length && !cleanAnnotations.some((annotation) => annotation.note)) {
-      setRevisionNotice("请先填写整体修改说明、标记说明或选择问题标签。");
+    if (!cleanDescription && !cleanAnnotations.some((annotation) => annotation.note)) {
+      setRevisionNotice("请先填写整体修改说明或标记说明。");
       return;
     }
     revise.mutate({
       generationId: revisionTarget.id,
-      input: { issue_tags: selectedTags, description: cleanDescription, annotations: cleanAnnotations },
+      input: { issue_tags: [], description: cleanDescription, annotations: cleanAnnotations },
+    });
+  };
+  const downloadSelectedImages = () => {
+    allCompleted.filter((output) => selectedIds.has(output.id) && output.imageUrl).forEach((output) => {
+      const anchor = document.createElement("a");
+      anchor.href = output.imageUrl as string;
+      anchor.download = downloadName(project.name, displaySlotName(output), `v${output.attempt}`);
+      anchor.click();
     });
   };
   const startDrawing = (event: PointerEvent<HTMLDivElement>) => {
@@ -284,7 +283,7 @@ export function ResultGrid({ project }: { project: Project }) {
                       </div>
                     )}
                     <div className="mt-3 flex flex-wrap gap-2">
-                      {(output.status === "completed" || output.status === "failed") && <button className="result-action" disabled={regenerate.isPending} onClick={() => regenerate.mutate(output.id)}>再生成 {outputName}</button>}
+                      {["failed", "canceled"].includes(output.status) && <button className="result-action" disabled={regenerate.isPending} onClick={() => regenerate.mutate(output.id)}>重试失败图 {outputName}</button>}
                       {output.status === "completed" && output.imageUrl && <button className="result-action" disabled={revise.isPending} onClick={() => openRevision(output)}>修改 {outputName} v{output.attempt}</button>}
                       {["queued", "running"].includes(output.status) && <button className="result-action result-action-warning" disabled={pause.isPending} onClick={() => pause.mutate(output.id)}>暂停 {outputName}</button>}
                     </div>
@@ -293,16 +292,21 @@ export function ResultGrid({ project }: { project: Project }) {
                         <p className="text-xs font-semibold text-slate-500">历史版本</p>
                         <div className="version-fan" aria-label={`${outputName}历史版本`}>
                           {history.slice(0, 5).map((item, index) => (
-                            <button
-                              aria-label={`查看历史版本 ${displaySlotName(item)} v${item.attempt}`}
+                            <div
                               className="version-card"
                               key={item.id}
-                              onClick={() => setSelectedOutputId(item.id)}
                               style={{ "--version-index": index } as CSSProperties}
                             >
-                              {item.imageUrl ? <img src={item.imageUrl} alt={`${displaySlotName(item)} v${item.attempt} 历史图`} loading="lazy" decoding="async" /> : <span>{item.status}</span>}
+                              <button className="size-full" type="button" aria-label={`查看历史版本 ${displaySlotName(item)} v${item.attempt}`} onClick={() => setSelectedOutputId(item.id)}>
+                                {item.imageUrl ? <img src={item.imageUrl} alt={`${displaySlotName(item)} v${item.attempt} 历史图`} loading="lazy" decoding="async" /> : <span>{item.status}</span>}
+                              </button>
+                              {item.status === "completed" && item.imageUrl && (
+                                <label className="absolute left-1 top-1 grid size-5 place-items-center rounded bg-white/90 shadow" onClick={(event) => event.stopPropagation()}>
+                                  <input aria-label={`导出 ${displaySlotName(item)} v${item.attempt}`} className="size-3.5" type="checkbox" checked={selectedIds.has(item.id)} onChange={() => toggle(item.id)} />
+                                </label>
+                              )}
                               <small>v{item.attempt}</small>
-                            </button>
+                            </div>
                           ))}
                         </div>
                       </div>
@@ -316,20 +320,23 @@ export function ResultGrid({ project }: { project: Project }) {
         })}
       </section>
       <aside className="surface h-fit p-5 xl:sticky xl:top-24">
-        <h2 className="font-semibold">选择式 ZIP</h2>
-        <p className="mt-2 text-sm text-slate-500">默认勾选每个槽位最新成功图。</p>
+        <h2 className="font-semibold">下载与导出</h2>
+        <p className="mt-2 text-sm text-slate-500">默认勾选每个槽位最新成功图，历史版本可单独勾选。</p>
         {zip.isError && <ErrorPanel error={zip.error} retry={() => zip.mutate()} />}
         {regenerate.isError && <ErrorPanel error={regenerate.error} retry={() => { if (selectedOutput) regenerate.mutate(selectedOutput.id); }} />}
         {pause.isError && <ErrorPanel error={pause.error} retry={() => { if (selectedOutput) pause.mutate(selectedOutput.id); }} />}
         <div className="mt-4 grid grid-cols-2 gap-2">
-          <button className="secondary-button justify-center" type="button" onClick={() => setSelectedIds(new Set(completed.map((output) => output.id)))}>
+          <button className="secondary-button justify-center" type="button" onClick={() => setSelectedIds(new Set(allCompleted.map((output) => output.id)))}>
             勾选全部
           </button>
           <button className="secondary-button justify-center" type="button" onClick={() => setSelectedIds(new Set())}>
             取消勾选
           </button>
         </div>
-        <button className="primary-button mt-3 w-full" disabled={!selectedIds.size || zip.isPending} onClick={() => zip.mutate()}>
+        <button className="primary-button mt-3 w-full" disabled={!selectedIds.size} onClick={downloadSelectedImages}>
+          下载选中图片（{selectedIds.size} 张）
+        </button>
+        <button className="secondary-button mt-2 w-full" disabled={!selectedIds.size || zip.isPending} onClick={() => zip.mutate()}>
           下载选中 ZIP（{selectedIds.size} 张）
         </button>
         {selectedOutput && (
@@ -393,18 +400,7 @@ export function ResultGrid({ project }: { project: Project }) {
                 </div>
               </section>
               <aside>
-                <fieldset>
-                  <legend className="text-sm font-medium text-slate-700">问题标签</legend>
-                  <div className="mt-2 grid grid-cols-2 gap-2">
-                    {issueTags.map(([value, label]) => (
-                      <label className="flex items-center gap-2 text-sm text-slate-700" key={value}>
-                        <input type="checkbox" checked={selectedTags.includes(value)} onChange={() => setSelectedTags((tags) => tags.includes(value) ? tags.filter((tag) => tag !== value) : [...tags, value])} />
-                        {label}
-                      </label>
-                    ))}
-                  </div>
-                </fieldset>
-                <label className="mt-4 block text-sm font-medium text-slate-700">
+                <label className="block text-sm font-medium text-slate-700">
                   <span className="mb-2 block">整体修改说明</span>
                   <textarea aria-label="整体修改说明" value={description} onChange={(event) => setDescription(event.target.value)} placeholder="例如：整体文字放大，商品不变，只优化右下角卖点说明" />
                 </label>

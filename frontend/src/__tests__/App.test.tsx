@@ -566,6 +566,10 @@ test("selects the latest successful version by default for export", async () => 
   expect(latest).toBeChecked();
   expect(screen.getByText("历史版本")).toBeInTheDocument();
   expect(screen.getByRole("img", { name: "核心卖点图 v1 历史图" })).toBeInTheDocument();
+  const history = screen.getByRole("checkbox", { name: "导出 核心卖点图 v1" });
+  expect(history).not.toBeChecked();
+  fireEvent.click(history);
+  expect(screen.getByRole("button", { name: "下载选中图片（9 张）" })).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "查看历史版本 核心卖点图 v1" }));
   expect(screen.getByRole("heading", { name: "核心卖点图 v1" })).toBeInTheDocument();
 });
@@ -592,6 +596,7 @@ test("keeps the previous successful result exportable while a new version is que
   renderApp("/projects/project-demo/results");
 
   expect(await screen.findByRole("button", { name: "下载选中 ZIP（8 张）" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "下载选中图片（8 张）" })).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "下载当前图片" })).toHaveAttribute("href", "/api/results/result-1/media/");
   fireEvent.click(screen.getByRole("button", { name: "下载选中 ZIP（8 张）" }));
 
@@ -608,6 +613,7 @@ test("lets operators cancel one result from the ZIP selection", async () => {
   fireEvent.click(first);
 
   expect(first).not.toBeChecked();
+  expect(screen.getByRole("button", { name: "下载选中图片（7 张）" })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "下载选中 ZIP（7 张）" })).toBeInTheDocument();
 });
 
@@ -630,6 +636,7 @@ test("posts only selected generation IDs when downloading the ZIP", async () => 
 });
 
 test("offers single-image downloads and bulk ZIP selection controls", async () => {
+  vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
   renderApp("/projects/project-demo/results");
 
   const single = await screen.findByRole("link", { name: "下载 标准白底产品图 v1" });
@@ -642,10 +649,14 @@ test("offers single-image downloads and bulk ZIP selection controls", async () =
 
   fireEvent.click(screen.getByRole("button", { name: "勾选全部" }));
   expect(first).toBeChecked();
-  expect(screen.getByRole("button", { name: "下载选中 ZIP（8 张）" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "下载选中图片（9 张）" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "下载选中 ZIP（9 张）" })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "下载选中图片（9 张）" }));
+  expect(HTMLAnchorElement.prototype.click).toHaveBeenCalled();
 
   fireEvent.click(screen.getByRole("button", { name: "取消勾选" }));
   expect(first).not.toBeChecked();
+  expect(screen.getByRole("button", { name: "下载选中图片（0 张）" })).toBeDisabled();
   expect(screen.getByRole("button", { name: "下载选中 ZIP（0 张）" })).toBeDisabled();
 });
 
@@ -661,6 +672,7 @@ test("exports completed results by default without approval and shows the genera
   renderApp("/projects/project-demo/results");
 
   expect(await screen.findByRole("checkbox", { name: "导出 标准白底产品图 v1" })).toBeChecked();
+  expect(screen.getByRole("button", { name: "下载选中图片（8 张）" })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "下载选中 ZIP（8 张）" })).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "通过此图，允许导出" })).not.toBeInTheDocument();
   expect(screen.queryByText("没有审核通过的图片，先在下方通过需要导出的图。")).not.toBeInTheDocument();
@@ -674,38 +686,40 @@ test("exports completed results by default without approval and shows the genera
   expect(JSON.parse(String(call?.[1]?.body)).generation_ids).toContain("generation-1");
 });
 
-test("requests a new version for a successful result", async () => {
-  const fetchMock = stubFetch();
+test("does not offer random regeneration for a successful result", async () => {
   renderApp("/projects/project-demo/results");
 
-  fireEvent.click(await screen.findByRole("button", { name: "再生成 标准白底产品图" }));
-
-  await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
-    "/api/generations/generation-1/regenerate/",
-    expect.objectContaining({ method: "POST" }),
-  ));
+  await screen.findByRole("img", { name: "标准白底产品图结果图" });
+  expect(screen.queryByRole("button", { name: "再生成 标准白底产品图" })).not.toBeInTheDocument();
 });
 
-test("does not submit duplicate result regeneration while the request is pending", async () => {
+test("retries failed results and blocks duplicate retry clicks", async () => {
   let finishRegenerate: (() => void) | undefined;
+  const failedProject = {
+    ...project,
+    skus: [{
+      ...project.skus[0],
+      outputs: [{ ...outputs[0], id: "generation-failed", status: "failed", imageUrl: undefined, failureReason: "生成失败" }],
+    }],
+  };
   const fetchMock = stubFetch((url) => {
     if (url.includes("/csrf/")) return Promise.resolve(response(200, { csrf_token: "csrf-for-test" }));
-    if (url.includes("/workspace/")) return Promise.resolve(response(200, { projects: [project] }));
-    if (url === "/api/generations/generation-1/regenerate/") {
+    if (url.includes("/workspace/")) return Promise.resolve(response(200, { projects: [failedProject] }));
+    if (url === "/api/generations/generation-failed/regenerate/") {
       return new Promise((resolve) => {
         finishRegenerate = () => resolve(response(200, { id: "generation-new", attempt: 2, status: "queued" }));
       });
     }
-    return Promise.resolve(response(200, project));
+    return Promise.resolve(response(200, failedProject));
   });
   renderApp("/projects/project-demo/results");
 
-  const button = await screen.findByRole("button", { name: "再生成 标准白底产品图" });
+  const button = await screen.findByRole("button", { name: "重试失败图 标准白底产品图" });
   fireEvent.click(button);
   await waitFor(() => expect(button).toBeDisabled());
   fireEvent.click(button);
 
-  expect(fetchMock.mock.calls.filter(([url]) => String(url) === "/api/generations/generation-1/regenerate/")).toHaveLength(1);
+  expect(fetchMock.mock.calls.filter(([url]) => String(url) === "/api/generations/generation-failed/regenerate/")).toHaveLength(1);
   finishRegenerate?.();
 });
 
@@ -739,6 +753,7 @@ test("opens a large revision editor and lets users undo or clear mistaken marks"
   fireEvent.click(await screen.findByRole("button", { name: "修改 标准白底产品图 v1" }));
 
   expect(await screen.findByRole("dialog", { name: "修改 标准白底产品图 v1" })).toBeInTheDocument();
+  expect(screen.queryByText("问题标签")).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "添加修改区域" }));
   expect(screen.queryByText("标记 1")).not.toBeInTheDocument();
   dragRevisionArea();
@@ -767,13 +782,12 @@ test("submits result revision annotations to create a new image version", async 
   dragRevisionArea();
   fireEvent.change(screen.getByLabelText("整体修改说明"), { target: { value: "整体文字放大，商品不变" } });
   fireEvent.change(screen.getByLabelText("标记 1 修改说明"), { target: { value: "把这里的泰文改清晰" } });
-  fireEvent.click(screen.getByRole("checkbox", { name: "Logo / 文字" }));
   fireEvent.click(screen.getByRole("button", { name: "提交修改生成新版本" }));
 
   await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url) === "/api/generations/generation-1/revise/")).toBe(true));
   const call = fetchMock.mock.calls.find(([url]) => String(url) === "/api/generations/generation-1/revise/");
   expect(JSON.parse(String(call?.[1]?.body))).toEqual({
-    issue_tags: ["logo_text"],
+    issue_tags: [],
     description: "整体文字放大，商品不变",
     annotations: [{
       kind: "rect",
