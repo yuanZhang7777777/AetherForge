@@ -433,14 +433,16 @@ def _gpt55_single_node(db: Session, cluster: Cluster, site: str) -> tuple[str, d
     client = APIMartClient()
     with ExitStack() as stack:
         image_sources: list[str] = []
-        for item in cluster.cluster_assets:
-            if item.asset.kind != "image":
-                continue
-            try:
-                local = stack.enter_context(get_storage().local_path(item.asset.storage_path))
-                image_sources.append(str(local))
-            except Exception:
-                continue
+        should_send_images = bool(getattr(cluster.batch, "ai_recognition_enabled", False) and not product_name)
+        if should_send_images:
+            for item in cluster.cluster_assets:
+                if item.asset.kind != "image":
+                    continue
+                try:
+                    local = stack.enter_context(get_storage().local_path(item.asset.storage_path))
+                    image_sources.append(str(local))
+                except Exception:
+                    continue
         result = client.complete_json(
             n_prepare_single_gpt55_system(site),
             n_prepare_single_gpt55_user(

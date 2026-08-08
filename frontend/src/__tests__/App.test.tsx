@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import App from "../App";
@@ -338,6 +338,29 @@ test("previews pending images without filenames and does not resubmit successful
   expect(secondFiles.map((file) => file.name)).toEqual(["side.png"]);
 });
 
+test("lets users remove pending upload images before importing", async () => {
+  const fetchMock = stubFetch();
+  renderApp("/projects/project-demo");
+
+  await openImportPanel();
+  fireEvent.click(screen.getByRole("button", { name: "选择图片/文件夹" }));
+  fireEvent.change(await screen.findByLabelText("选择图片"), {
+    target: { files: [
+      new File(["front"], "front.png", { type: "image/png" }),
+      new File(["side"], "side.png", { type: "image/png" }),
+    ] },
+  });
+
+  fireEvent.click(screen.getByRole("button", { name: "移除待导入商品图 1" }));
+  expect(screen.queryByRole("img", { name: "待导入商品图 2" })).not.toBeInTheDocument();
+  fireEvent.click(screen.getAllByRole("button", { name: "导入后整理" })[0]);
+
+  await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/assets/"))).toBe(true));
+  const upload = fetchMock.mock.calls.find(([url]) => String(url).includes("/assets/"));
+  const files = (upload?.[1]?.body as FormData).getAll("files") as File[];
+  expect(files.map((file) => file.name)).toEqual(["side.png"]);
+});
+
 test("keeps pending files when the first upload request fails", async () => {
   stubFetch(async (url) => {
     if (url.includes("/csrf/")) return response(200, { csrf_token: "csrf-for-test" });
@@ -419,6 +442,27 @@ test("saves product platform and country overrides through the cluster endpoint"
   await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/clusters/sku-lamp/"))).toBe(true));
   const call = fetchMock.mock.calls.find(([url]) => String(url).includes("/api/clusters/sku-lamp/"));
   expect(JSON.parse(String(call?.[1]?.body))).toMatchObject({ platform_override: "tiktok" });
+});
+
+test("uses in-app confirmation for product and asset deletion", async () => {
+  const fetchMock = stubFetch();
+  const nativeConfirm = vi.spyOn(window, "confirm").mockImplementation(() => {
+    throw new Error("native confirm should not be used");
+  });
+  renderApp("/projects/project-demo");
+
+  fireEvent.click(await screen.findByRole("button", { name: "桌面护眼灯 详情" }));
+  fireEvent.click(screen.getByRole("button", { name: "删除商品参考图 1" }));
+  const assetDialog = screen.getByRole("dialog", { name: "删除商品参考图" });
+  fireEvent.click(within(assetDialog).getByRole("button", { name: "取消" }));
+  expect(fetchMock.mock.calls.some(([url, init]) => String(url).includes("/api/assets/asset-lamp-main/") && init?.method === "DELETE")).toBe(false);
+
+  fireEvent.click(screen.getByRole("button", { name: "删除商品" }));
+  const productDialog = screen.getByRole("dialog", { name: "删除“桌面护眼灯”？" });
+  fireEvent.click(within(productDialog).getByRole("button", { name: "删除商品" }));
+
+  await waitFor(() => expect(fetchMock.mock.calls.some(([url, init]) => String(url).includes("/api/clusters/sku-lamp/") && init?.method === "DELETE")).toBe(true));
+  expect(nativeConfirm).not.toHaveBeenCalled();
 });
 
 test("starts generation for selected products and shows product and image counts", async () => {

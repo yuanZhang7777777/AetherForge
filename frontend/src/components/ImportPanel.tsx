@@ -125,7 +125,7 @@ export function ImportPanel({
         </div>
       <input ref={imagePicker} className="sr-only" aria-label="选择图片" type="file" multiple accept={acceptedTypes} onChange={(event) => { addFiles(Array.from(event.target.files ?? [])); event.currentTarget.value = ""; }} />
       <input ref={folderPicker} className="sr-only" aria-label="选择文件夹" type="file" multiple accept={acceptedTypes} {...folderInputProps} onChange={(event) => { addFiles(Array.from(event.target.files ?? [])); event.currentTarget.value = ""; }} />
-      {imageFiles.length > 0 && <div className="mt-4 grid grid-cols-5 gap-2 sm:grid-cols-8">{imageFiles.map((file, index) => <PendingImage key={`${uploadPath(file)}:${file.size}:${file.lastModified}`} file={file} index={index} />)}</div>}
+      {imageFiles.length > 0 && <div className="mt-4 grid grid-cols-5 gap-2 sm:grid-cols-8">{imageFiles.map((file, index) => <PendingImage key={`${uploadPath(file)}:${file.size}:${file.lastModified}`} file={file} index={index} onDelete={() => setFiles((current) => current.filter((item) => item !== file))} />)}</div>}
       <div className="mt-3 flex flex-wrap gap-2">
         <button className="primary-button" disabled={disabled || !files.length || Boolean(fileLoadingMode)} onClick={() => void uploadFiles("organize")}>{fileLoadingMode === "organize" ? "导入中…" : "导入后整理"}</button>
         <button className="secondary-button" disabled={disabled || !files.length || Boolean(fileLoadingMode)} onClick={() => void uploadFiles("auto")}>{fileLoadingMode === "auto" ? "导入中…" : "导入并自动出图"}</button>
@@ -152,8 +152,8 @@ function skuErrorMessage(code: string | null | undefined) {
   return ({ sku_not_found: "SKU 不存在或无可用商品图片", catalog_unavailable: "ERP 商品服务暂不可用", catalog_image_invalid: "商品图片无法导入", archive_failed: "商品图片归档失败", project_locked: "项目当前不可导入", login_expired: "登录已过期，请重新登录后导入", project_image_limit: "每个项目最多 100 张图片" } as Record<string, string>)[code ?? ""] ?? "导入失败，请重试";
 }
 
-function PendingImage({ file, index }: { file: File; index: number }) {
+function PendingImage({ file, index, onDelete }: { file: File; index: number; onDelete: () => void }) {
   const [source] = useState(() => typeof URL.createObjectURL === "function" ? URL.createObjectURL(file) : "data:image/gif;base64,R0lGODlhAQABAAAAACw=");
   useEffect(() => () => { if (source.startsWith("blob:") && typeof URL.revokeObjectURL === "function") URL.revokeObjectURL(source); }, [source]);
-  return <img className="aspect-square w-full rounded-lg border border-slate-200 object-cover" src={source} alt={`待导入商品图 ${index + 1}`} />;
+  return <div className="relative"><img className="aspect-square w-full rounded-lg border border-slate-200 object-cover" src={source} alt={`待导入商品图 ${index + 1}`} /><button aria-label={`移除待导入商品图 ${index + 1}`} className="absolute -right-1 -top-1 grid size-5 place-items-center rounded-full bg-slate-950 text-xs text-white" type="button" onClick={onDelete}>×</button></div>;
 }

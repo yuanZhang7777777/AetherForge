@@ -41,6 +41,7 @@ def main() -> None:
     test_prompt_item_can_skip_legacy_front_load()
     test_gpt55_system_prompt_is_neutral_designer_node()
     test_gpt55_single_node_uses_one_apimart_call()
+    test_gpt55_single_node_skips_image_input_when_product_name_is_filled()
     print("PASS: split-slot N2 prompt writer")
 
 
@@ -282,6 +283,59 @@ def test_gpt55_single_node_uses_one_apimart_call() -> None:
     assert cluster.product_name == "黄色毛绒玩具"
     assert cluster.product_facts.startswith("黄色毛绒材质")
     assert cluster.identity_lock.startswith("主商品 黄色毛绒玩具")
+
+
+def test_gpt55_single_node_skips_image_input_when_product_name_is_filled() -> None:
+    class FakeAPIMart:
+        def __init__(self) -> None:
+            self.calls: list[dict] = []
+
+        def complete_json(self, system: str, user: str, **kwargs):
+            self.calls.append({"system": system, "user": user, "kwargs": kwargs})
+            return {
+                "json": {
+                    "identity": {},
+                    "identity_lock": "",
+                    "style_brief": "按用户填写商品名设计",
+                    "prompts": [{
+                        "slot": 1,
+                        "zh": "主图围绕用户填写的商品名称设计。",
+                        "final": "IDENTITY: use the user-provided product name.",
+                        "target_language_copy": "สินค้า",
+                    }],
+                }
+            }
+
+    class ExplodingStorage:
+        def local_path(self, storage_path: str):
+            raise AssertionError("image path should not be read when product name is filled")
+
+    fake_client = FakeAPIMart()
+    original_client = prepare_module.APIMartClient
+    original_storage = prepare_module.get_storage
+    prepare_module.APIMartClient = lambda: fake_client
+    prepare_module.get_storage = lambda: ExplodingStorage()
+    try:
+        cluster = SimpleNamespace(
+            name="",
+            product_name="手填商品名",
+            store_name="",
+            product_facts="",
+            identity_lock="",
+            analysis_snapshot={},
+            cluster_assets=[SimpleNamespace(asset=SimpleNamespace(kind="image", storage_path="assets/front.png"))],
+            batch=SimpleNamespace(
+                ai_recognition_enabled=True,
+                output_template=SimpleNamespace(slots=[SimpleNamespace(order=1, name="Shopee high-CTR main poster", id="slot-1")]),
+                global_prompt="",
+            ),
+        )
+        _gpt55_single_node(None, cluster, "TH")
+    finally:
+        prepare_module.APIMartClient = original_client
+        prepare_module.get_storage = original_storage
+
+    assert fake_client.calls[0]["kwargs"]["image_sources"] == []
 
 
 if __name__ == "__main__":

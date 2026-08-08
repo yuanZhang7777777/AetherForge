@@ -16,6 +16,7 @@ function isGlobalError(error: unknown) {
 }
 
 const REAL_MARKETS = [...commonMarkets, ...extraMarkets].filter(([code]) => code !== "SEA");
+type ConfirmAction = { title: string; body: string; confirmText: string; onConfirm: () => void };
 
 function generationSlotOrders(skus: ProductSku[]) {
   const orders = skus.flatMap((sku) => (sku.prompts ?? [])
@@ -50,6 +51,7 @@ export default function ProjectGrouping() {
   const needsCountry = Boolean(project && (!project.market || project.market === "SEA"));
   const [countryDraft, setCountryDraft] = useState<string>(REAL_MARKETS[0]?.[0] ?? "TH");
   const [activeDrag, setActiveDrag] = useState<ProductAsset | null>(null);
+  const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(null);
   const selectedClusters = useMemo(() => project?.skus.filter((sku) => !deselectedIds.has(sku.id)) ?? [], [project, deselectedIds]);
   const selectedPreparing = selectedClusters.some(skuHasActivePreparation);
   const selectedGenerating = selectedClusters.some(skuHasActiveGeneration);
@@ -299,6 +301,18 @@ export default function ProjectGrouping() {
   const nameRequiredNotice = /请先填写商品名称/.test(actionNotice);
 
   return <Shell>
+    {confirmAction && (
+      <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label={confirmAction.title}>
+        <section className="w-[min(28rem,calc(100vw-2rem))] rounded-2xl border border-white/70 bg-white p-6 shadow-2xl">
+          <h2 className="text-lg font-bold text-slate-950">{confirmAction.title}</h2>
+          <p className="mt-3 text-sm leading-6 text-slate-600">{confirmAction.body}</p>
+          <div className="mt-6 flex justify-end gap-2">
+            <button className="secondary-button" type="button" onClick={() => setConfirmAction(null)}>取消</button>
+            <button className="primary-button" type="button" onClick={() => { const run = confirmAction.onConfirm; setConfirmAction(null); run(); }}>{confirmAction.confirmText}</button>
+          </div>
+        </section>
+      </div>
+    )}
     {needsCountry && (
       <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/50 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="选择目标国家">
         <div className="w-[min(28rem,calc(100vw-2rem))] rounded-2xl border border-white/70 bg-white/80 p-6 shadow-2xl backdrop-blur-xl">
@@ -317,7 +331,7 @@ export default function ProjectGrouping() {
     {globalError && <div className="mb-5"><ErrorPanel error={globalError} /></div>}
     <DndContext sensors={sensors} measuring={{ droppable: { strategy: MeasuringStrategy.BeforeDragging } }} onDragStart={onDragStart} onDragCancel={() => setActiveDrag(null)} onDragEnd={onDragEnd}><ProductGrid>{project.skus.map((sku) => {
       const assets = sku.assets ?? project.assets.filter((asset) => sku.assetIds.includes(asset.id));
-      return <ProductCard key={sku.id} sku={sku} assets={assets} selected={!deselectedIds.has(sku.id)} expanded={expandedId === sku.id} disabled={removeAsset.isPending || removeCluster.isPending} onOpen={() => setExpandedId(sku.id)} onClose={() => setExpandedId(null)} onSave={(payload, expectedVersion) => save.mutateAsync({ skuId: sku.id, expectedVersion, payload })} onReload={() => projectQuery.refetch()} onDeleteAsset={(assetId) => removeAsset.mutate(assetId)} onDelete={() => removeCluster.mutate(sku.id)} onPause={() => pause.mutate([sku.id])} onSelect={(next) => setDeselectedIds((current) => { const copy = new Set(current); if (next) copy.delete(sku.id); else copy.add(sku.id); return copy; })} />;
+      return <ProductCard key={sku.id} sku={sku} assets={assets} selected={!deselectedIds.has(sku.id)} expanded={expandedId === sku.id} disabled={removeAsset.isPending || removeCluster.isPending} onOpen={() => setExpandedId(sku.id)} onClose={() => setExpandedId(null)} onSave={(payload, expectedVersion) => save.mutateAsync({ skuId: sku.id, expectedVersion, payload })} onReload={() => projectQuery.refetch()} onDeleteAsset={(assetId) => setConfirmAction({ title: "删除商品参考图", body: "这张参考图会从当前商品中移除；如果商品没有其他图片，商品也会被归档。", confirmText: "确认删除", onConfirm: () => removeAsset.mutate(assetId) })} onDelete={() => setConfirmAction({ title: `删除“${sku.name || "未命名商品"}”？`, body: "有历史结果时只会归档，不会清空已经生成过的结果文件。", confirmText: "删除商品", onConfirm: () => removeCluster.mutate(sku.id) })} onPause={() => pause.mutate([sku.id])} onSelect={(next) => setDeselectedIds((current) => { const copy = new Set(current); if (next) copy.delete(sku.id); else copy.add(sku.id); return copy; })} />;
     })}</ProductGrid>
       <DragOverlay dropAnimation={null}>
         {activeDrag?.imageUrl ? <div className="grid size-16 place-items-center overflow-hidden rounded-lg border border-indigo-500 bg-white shadow-xl ring-2 ring-indigo-200"><img className="size-full object-contain" src={activeDrag.imageUrl} alt="拖拽中的商品参考图" /></div> : null}
