@@ -255,7 +255,7 @@ export function ProductCard({ sku, assets, selected, expanded = false, onOpen = 
       setSavedDraft(draft);
     } catch (error) {
       if (error instanceof ApiError && error.status === 409) {
-        setSaveError("商品信息已更新，请保留修改后重试");
+        setSaveError("");
         void onReload();
       } else setSaveError(error instanceof Error ? friendlyPreparationError(error.message) : "保存失败，请重试");
     } finally {

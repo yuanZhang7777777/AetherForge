@@ -47,8 +47,8 @@ test("preserves a dirty card draft and retries with the refreshed version after 
 
   fireEvent.change(screen.getByLabelText("商品名称 旧名称"), { target: { value: "仍要保留的名称" } });
   fireEvent.blur(screen.getByLabelText("商品名称 仍要保留的名称"));
-  expect(await screen.findByText("商品信息已更新，请保留修改后重试")).toBeInTheDocument();
-  expect(onReload).toHaveBeenCalledTimes(1);
+  await waitFor(() => expect(onReload).toHaveBeenCalledTimes(1));
+  expect(screen.queryByText("商品信息已更新，请保留修改后重试")).not.toBeInTheDocument();
 
   view.rerender(<ProductCard {...props} sku={{ ...sku, version: 2 }} onSave={onSave.mockResolvedValueOnce({ id: "sku-1", version: 3 })} onReload={onReload} />);
   expect(screen.getByLabelText("商品名称 仍要保留的名称")).toHaveValue("仍要保留的名称");

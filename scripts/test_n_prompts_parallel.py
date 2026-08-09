@@ -12,7 +12,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import backend.services.prepare as prepare_module
 from backend.prompts import n_prepare_single_gpt55_system, n_prepare_single_gpt55_user
 from backend.services.prepare import _generate_n_prompts_parallel, _gpt55_single_node, _merge_single_node_identity, _n_prompts
-from backend.services.prepare import _single_node_prompt_quality_issues
 from backend.services.prepare import _prompt_item
 
 
@@ -67,10 +66,7 @@ def main() -> None:
     test_gpt55_single_node_uses_one_apimart_call()
     test_gpt55_single_node_skips_image_input_when_product_name_is_filled()
     test_gpt55_single_node_ignores_import_filename_placeholder_when_ai_recognition_enabled()
-    test_single_node_quality_retries_bad_dimension_and_steps()
-    test_single_node_quality_checks_visual_prompt_not_visible_text_length()
-    test_single_node_quality_does_not_block_on_short_zh_after_retry()
-    test_single_node_quality_accepts_visual_dimension_without_numbers()
+    test_gpt55_single_node_does_not_block_short_prompts()
     print("PASS: split-slot N2 prompt writer")
 
 
@@ -492,35 +488,13 @@ def test_gpt55_single_node_ignores_import_filename_placeholder_when_ai_recogniti
     assert fake_client.calls[0]["kwargs"]["image_sources"] == ["local-product-image.png"]
 
 
-def test_single_node_quality_retries_bad_dimension_and_steps() -> None:
+def test_gpt55_single_node_does_not_block_short_prompts() -> None:
     class FakeAPIMart:
         def __init__(self) -> None:
             self.calls: list[dict] = []
 
         def complete_json(self, system: str, user: str, **kwargs):
             self.calls.append({"system": system, "user": user, "kwargs": kwargs})
-            if len(self.calls) == 1:
-                return {
-                    "json": {
-                        "identity": {},
-                        "identity_lock": "主商品保持参考图一致。",
-                        "style_brief": "清晰电商信息图风格",
-                        "prompts": [
-                            {
-                                "slot": 6,
-                                "zh": "尺寸材质图：请查看商品页，未提供参数。",
-                                "final": "Size and material: please check product page, no parameters provided.",
-                                "target_language_copy": "โปรดดูรายละเอียดสินค้า",
-                            },
-                            {
-                                "slot": 7,
-                                "zh": "使用步骤：打开、放入、关闭。",
-                                "final": "Usage steps: Step 1 open lid, Step 2 place item inside, Step 3 close lid.",
-                                "target_language_copy": "ขั้นตอนการใช้งาน",
-                            },
-                        ],
-                    }
-                }
             return {
                 "json": {
                     "identity": {},
@@ -529,39 +503,15 @@ def test_single_node_quality_retries_bad_dimension_and_steps() -> None:
                     "prompts": [
                         {
                             "slot": 6,
-                            "zh": (
-                                "尺寸材质图，画面展示商品三分之二视角，旁边用高度、宽度、深度箭头标出外轮廓，"
-                                "右侧加入材质纹理局部放大窗和引线标签，用比例参照帮助买家理解大小，不填写未确认数字。"
-                                "整体是清晰电商信息图，商品保持参考图颜色、结构、数量和关键识别点不变。"
-                            ),
-                            "final": (
-                                "Create a size and material ecommerce information image for the same reference product. "
-                                "Show the product in a clean three-quarter studio view with dimension arrows for height, width, "
-                                "and depth around the outer silhouette, without numeric values. Add a ruler-style scale cue near "
-                                "the base, two magnified close-up inset windows for material texture and edge detail, and callout "
-                                "lines pointing to the visible structure. Use polished marketplace typography, clear labels, "
-                                "soft commercial lighting, and a neat information-card layout. Keep the reference product color, "
-                                "shape, structure, quantity, and key identity unchanged."
-                            ),
-                            "target_language_copy": "คู่มือขนาดและวัสดุ\nความสูง\nความกว้าง\nรายละเอียดวัสดุ",
+                            "zh": "尺寸材质图。",
+                            "final": "Size and material image.",
+                            "target_language_copy": "ดูขนาด",
                         },
                         {
                             "slot": 7,
-                            "zh": (
-                                "使用步骤图，三格分镜。第一格展示手打开商品上盖；第二格展示对应物品被放入，商品状态明显变化；"
-                                "第三格展示盖好后的完成展示状态。用数字圆点、箭头和短文案连接三步，商品外观保持一致。"
-                                "画面采用统一商业光线和清晰步骤卡片布局，让买家一眼理解操作流程。"
-                            ),
-                            "final": (
-                                "Create a three-panel usage steps ecommerce image for the same reference product. "
-                                "Panel 1: a hand opens the product lid or prepares the product before use, with the product empty "
-                                "and clearly visible. Panel 2: the matching item is placed inside or attached to the product, showing "
-                                "a visible state change from Panel 1 and the hand action in progress. Panel 3: the product is closed "
-                                "or completed in the correct final use state, presented neatly in a daily-use or gifting scene. "
-                                "Use numbered circles, arrows between panels, short readable copy, consistent commercial lighting, "
-                                "and clean ecommerce step-card layout. Preserve the reference product identity exactly."
-                            ),
-                            "target_language_copy": "ขั้นตอนการใช้งาน\n1. เปิด\n2. ใส่\n3. จัดแสดง",
+                            "zh": "使用步骤图。",
+                            "final": "Usage steps image.",
+                            "target_language_copy": "ใช้งานง่าย",
                         },
                     ],
                 }
@@ -590,118 +540,9 @@ def test_single_node_quality_retries_bad_dimension_and_steps() -> None:
         prepare_module.APIMartClient = original_client
 
     assert style_brief == "清晰电商信息图风格"
-    assert len(fake_client.calls) == 2
-    assert "final 过短" in fake_client.calls[1]["user"]
-    assert "缺失参数" in fake_client.calls[1]["user"]
-    assert "Panel 1" in prompts[7]["final"]
-
-
-def test_single_node_quality_checks_visual_prompt_not_visible_text_length() -> None:
-    long_copy = (
-        "คุณภาพและความน่าเชื่อถือ: แสดงตราคุณภาพ ตรวจสอบคุณภาพ บรรจุภัณฑ์ที่มั่นคง "
-        "เนื้อวัสดุและโครงสร้างที่แข็งแรง เน้นรายละเอียดด้วยภาพใกล้ชิด พร้อมโลโก้ xuecheng "
-        "เพื่อสร้างความน่าเชื่อถือ"
-    )
-    parsed = _prompt_item(
-        {
-            "slot": 9,
-            "zh": rich_zh("品质信任图"),
-            "final": "Quality & trust: show QC stamp, secure packaging components, material texture, and stable structure. "
-            "VISIBLE TEXT: Render exactly these lines:\n" + long_copy,
-            "target_language_copy": long_copy,
-        },
-        front_load=False,
-    )
-    assert parsed is not None
-    _, prompt = parsed
-    issues = _single_node_prompt_quality_issues(
-        {9: prompt},
-        [{"order": 9, "name": "Quality and trust"}],
-        include_preview_issues=True,
-    )
-    assert any("final 过短" in issue for issue in issues)
-    assert any("可见文字不是短文案" in issue for issue in issues)
-
-
-def test_single_node_quality_accepts_visual_dimension_without_numbers() -> None:
-    issues = _single_node_prompt_quality_issues(
-        {
-            6: {
-                "zh": (
-                    "尺寸材质图，展示商品完整外轮廓，使用高度、宽度、深度方向箭头和比例参照，"
-                    "右侧加入材质纹理局部放大窗、边缘结构放大窗和引线短标注，不填写未确认数字。"
-                    "画面使用清晰电商信息图布局、浅色背景和商业摄影光线，保持参考商品外观、颜色、结构和数量不变。"
-                ),
-                "final": (
-                    "Create a size and material ecommerce information graphic for the same reference product. "
-                    "Use dimension arrows for height, width, and depth around the full product silhouette, with a hand or ruler "
-                    "as scale reference but no numeric values. Add two magnified close-up inset windows for material texture and "
-                    "edge detail, with callout lines and small icons explaining the visible structure. Keep the product identity, "
-                    "color, structure, quantity, and key parts unchanged. Use clean marketplace typography and commercial lighting."
-                ),
-                "target_language_copy": "คู่มือขนาดและวัสดุ\nความสูง\nความกว้าง\nรายละเอียดวัสดุ",
-            }
-        },
-        [{"order": 6, "name": "尺寸材质图"}],
-    )
-    assert issues == []
-
-
-def test_single_node_quality_does_not_block_on_short_zh_after_retry() -> None:
-    class FakeAPIMart:
-        def __init__(self) -> None:
-            self.calls: list[dict] = []
-
-        def complete_json(self, system: str, user: str, **kwargs):
-            self.calls.append({"system": system, "user": user, "kwargs": kwargs})
-            return {
-                "json": {
-                    "identity": {},
-                    "identity_lock": "主商品保持参考图一致。",
-                    "style_brief": "统一清晰电商信息图风格",
-                    "prompts": [
-                        {
-                            "slot": 3,
-                            "zh": "细节特写图。",
-                            "final": rich_final("the product detail close-up image"),
-                            "target_language_copy": "รายละเอียดสินค้า",
-                        },
-                        {
-                            "slot": 4,
-                            "zh": "真实使用场景图。",
-                            "final": rich_final("the real-life use image"),
-                            "target_language_copy": "ใช้งานง่าย",
-                        },
-                    ],
-                }
-            }
-
-    fake_client = FakeAPIMart()
-    original_client = prepare_module.APIMartClient
-    prepare_module.APIMartClient = lambda: fake_client
-    try:
-        slots = [
-            SimpleNamespace(order=3, name="Detail close-up", id="slot-3"),
-            SimpleNamespace(order=4, name="Real-life use", id="slot-4"),
-        ]
-        cluster = SimpleNamespace(
-            name="商品",
-            product_name="商品",
-            store_name="",
-            product_facts="",
-            identity_lock="",
-            analysis_snapshot={},
-            cluster_assets=[],
-            batch=SimpleNamespace(output_template=SimpleNamespace(slots=slots), global_prompt=""),
-        )
-        style_brief, prompts, _node = _gpt55_single_node(None, cluster, "TH")
-    finally:
-        prepare_module.APIMartClient = original_client
-
-    assert style_brief == "统一清晰电商信息图风格"
-    assert len(fake_client.calls) == 2
-    assert "zh 过短" in fake_client.calls[1]["user"]
-    assert sorted(prompts) == [3, 4]
+    assert len(fake_client.calls) == 1
+    assert prompts[6]["final"] == "Size and material image.\nVISIBLE TEXT:\nดูขนาด"
+    assert prompts[7]["final"] == "Usage steps image.\nVISIBLE TEXT:\nใช้งานง่าย"
 
 
 if __name__ == "__main__":
