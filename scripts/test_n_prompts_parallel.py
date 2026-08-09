@@ -66,6 +66,7 @@ def main() -> None:
     test_gpt55_single_node_skips_image_input_when_product_name_is_filled()
     test_gpt55_single_node_ignores_import_filename_placeholder_when_ai_recognition_enabled()
     test_single_node_quality_retries_bad_dimension_and_steps()
+    test_single_node_quality_does_not_block_on_short_zh_after_retry()
     test_single_node_quality_accepts_visual_dimension_without_numbers()
     print("PASS: split-slot N2 prompt writer")
 
@@ -575,6 +576,63 @@ def test_single_node_quality_accepts_visual_dimension_without_numbers() -> None:
         [{"order": 6, "name": "尺寸材质图"}],
     )
     assert issues == []
+
+
+def test_single_node_quality_does_not_block_on_short_zh_after_retry() -> None:
+    class FakeAPIMart:
+        def __init__(self) -> None:
+            self.calls: list[dict] = []
+
+        def complete_json(self, system: str, user: str, **kwargs):
+            self.calls.append({"system": system, "user": user, "kwargs": kwargs})
+            return {
+                "json": {
+                    "identity": {},
+                    "identity_lock": "主商品保持参考图一致。",
+                    "style_brief": "统一清晰电商信息图风格",
+                    "prompts": [
+                        {
+                            "slot": 3,
+                            "zh": "细节特写图。",
+                            "final": rich_final("the product detail close-up image"),
+                            "target_language_copy": "รายละเอียดสินค้า",
+                        },
+                        {
+                            "slot": 4,
+                            "zh": "真实使用场景图。",
+                            "final": rich_final("the real-life use image"),
+                            "target_language_copy": "ใช้งานง่าย",
+                        },
+                    ],
+                }
+            }
+
+    fake_client = FakeAPIMart()
+    original_client = prepare_module.APIMartClient
+    prepare_module.APIMartClient = lambda: fake_client
+    try:
+        slots = [
+            SimpleNamespace(order=3, name="Detail close-up", id="slot-3"),
+            SimpleNamespace(order=4, name="Real-life use", id="slot-4"),
+        ]
+        cluster = SimpleNamespace(
+            name="商品",
+            product_name="商品",
+            store_name="",
+            product_facts="",
+            identity_lock="",
+            analysis_snapshot={},
+            cluster_assets=[],
+            batch=SimpleNamespace(output_template=SimpleNamespace(slots=slots), global_prompt=""),
+        )
+        style_brief, prompts, _node = _gpt55_single_node(None, cluster, "TH")
+    finally:
+        prepare_module.APIMartClient = original_client
+
+    assert style_brief == "统一清晰电商信息图风格"
+    assert len(fake_client.calls) == 2
+    assert "zh 过短" in fake_client.calls[1]["user"]
+    assert sorted(prompts) == [3, 4]
 
 
 if __name__ == "__main__":

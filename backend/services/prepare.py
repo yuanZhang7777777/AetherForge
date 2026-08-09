@@ -482,7 +482,11 @@ def _gpt55_single_node(db: Session, cluster: Cluster, site: str) -> tuple[str, d
                 if attempt == 0:
                     continue
                 raise
-            last_issues = _single_node_prompt_quality_issues(prompts, slots)
+            last_issues = _single_node_prompt_quality_issues(
+                prompts,
+                slots,
+                include_preview_issues=attempt == 0,
+            )
             if not last_issues:
                 return style_brief, prompts, node
     raise PreparationFailed("APIMart 单节点提示词质量不合格：" + "；".join(last_issues))
@@ -508,7 +512,12 @@ def _parse_single_node_result(node, slots: list[dict]) -> tuple[str, dict[int, d
     return style_brief, prompts, node
 
 
-def _single_node_prompt_quality_issues(prompts: dict[int, dict], slots: list[dict]) -> list[str]:
+def _single_node_prompt_quality_issues(
+    prompts: dict[int, dict],
+    slots: list[dict],
+    *,
+    include_preview_issues: bool = True,
+) -> list[str]:
     slot_names = {int(s.get("order") or 0): str(s.get("name") or "") for s in slots}
     issues: list[str] = []
     for slot, prompt in sorted(prompts.items()):
@@ -520,7 +529,7 @@ def _single_node_prompt_quality_issues(prompts: dict[int, dict], slots: list[dic
 
         if len(final) < _MIN_SINGLE_NODE_FINAL_CHARS:
             issues.append(f"{label} final 过短，需要补充构图、商品状态、图形设计和画面细节")
-        if len(zh) < _MIN_SINGLE_NODE_ZH_CHARS:
+        if include_preview_issues and len(zh) < _MIN_SINGLE_NODE_ZH_CHARS:
             issues.append(f"{label} zh 过短，需要给用户可编辑的完整中文生图提示词")
 
         lower_final = final.lower()
