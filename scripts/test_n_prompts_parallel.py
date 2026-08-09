@@ -10,9 +10,10 @@ from types import SimpleNamespace
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import backend.services.prepare as prepare_module
-from backend.prompts import n_prepare_single_gpt55_system, n_prepare_single_gpt55_user
+from backend.prompts import n_prepare_single_gpt55_system, n_prepare_single_gpt55_user, retranslate_final_prompt
 from backend.services.prepare import _generate_n_prompts_parallel, _gpt55_single_node, _merge_single_node_identity, _n_prompts
 from backend.services.prepare import _prompt_item
+from backend.services.serialize import _prompt_slot_metadata
 
 
 class FakeDeepSeek:
@@ -61,11 +62,15 @@ def main() -> None:
     test_prompt_item_can_skip_legacy_front_load()
     test_prompt_item_normalizes_literal_newlines()
     test_prompt_item_prefers_short_visible_text_lines_and_strips_long_block()
+    test_prompt_item_recovers_visible_text_from_zh()
     test_gpt55_system_prompt_is_neutral_designer_node()
     test_gpt55_system_treats_store_name_as_ad_layer()
+    test_retranslate_uses_edited_zh_as_complete_source()
+    test_legacy_display_prompt_includes_saved_visible_text()
     test_gpt55_single_node_uses_one_apimart_call()
-    test_gpt55_single_node_skips_image_input_when_product_name_is_filled()
+    test_gpt55_single_node_always_sends_image_input_when_product_name_is_filled()
     test_gpt55_single_node_ignores_import_filename_placeholder_when_ai_recognition_enabled()
+    test_gpt55_single_node_does_not_write_back_identity_when_ai_recognition_is_disabled()
     test_gpt55_single_node_does_not_block_short_prompts()
     print("PASS: split-slot N2 prompt writer")
 
@@ -89,7 +94,8 @@ def test_parallel_slot_generation() -> None:
 
     assert style_brief == "统一奶油白摄影风格"
     assert sorted(prompts) == [1, 2, 3]
-    assert prompts[2]["zh"] == "槽位 2 中文生图提示词"
+    assert prompts[2]["zh"].startswith("槽位 2 中文生图提示词")
+    assert prompts[2]["zh"].endswith("画面可见文字：\n文案 2")
     assert prompts[3]["target_language_copy"] == "文案 3"
     assert len(client.calls) == 4, client.calls
     slot_calls = client.calls[1:]
@@ -138,7 +144,7 @@ def test_parallel_failure_falls_back_to_single_call() -> None:
         prepare_module.DeepSeekClient = original_client
 
     assert style_brief == "旧路径统一风格"
-    assert prompts[1]["zh"] == "旧路径中文生图提示词"
+    assert prompts[1]["zh"].startswith("旧路径中文生图提示词")
     assert len(fake_client.calls) == 2
 
 
@@ -158,6 +164,8 @@ def test_prompt_item_front_loads_shopee_ad_style_and_visible_copy() -> None:
     assert "target_language_copy field" not in prompt["final"]
     assert "HOT SALE" in prompt["final"]
     assert "ส่งฟรี" in prompt["final"]
+    assert "画面可见文字：" in prompt["zh"]
+    assert prompt["zh"].endswith("HOT SALE\nส่งฟรี")
 
 
 def test_prompt_item_can_skip_legacy_front_load() -> None:
@@ -193,7 +201,7 @@ def test_prompt_item_normalizes_literal_newlines() -> None:
     assert "/n" not in prompt["zh"]
     assert "\\n" not in prompt["final"]
     assert "/n" not in prompt["final"]
-    assert prompt["zh"] == "第一行\n第二行\n第三行"
+    assert prompt["zh"] == "第一行\n第二行\n第三行\n画面可见文字：\n标题\n卖点"
     assert "Line one.\nLine two.\nLine three." in prompt["final"]
     assert prompt["target_language_copy"] == "标题\n卖点"
 
@@ -224,6 +232,23 @@ def test_prompt_item_prefers_short_visible_text_lines_and_strips_long_block() ->
     assert "Render exactly" not in prompt["final"]
     assert prompt["final"].endswith("พร้อมส่งมั่นใจ\nวัสดุเรียบร้อย\nแพ็กอย่างดี")
     assert prompt["target_language_copy"] == "พร้อมส่งมั่นใจ\nวัสดุเรียบร้อย\nแพ็กอย่างดี"
+    assert prompt["zh"].endswith("画面可见文字：\nพร้อมส่งมั่นใจ\nวัสดุเรียบร้อย\nแพ็กอย่างดี")
+
+
+def test_prompt_item_recovers_visible_text_from_zh() -> None:
+    parsed = _prompt_item(
+        {
+            "slot": 4,
+            "zh": "真实使用场景图，展示商品完成实际用途。\n画面可见文字：\nใช้งานจริง\nพร้อมทุกวัน",
+            "final": "Real-life ecommerce use scene with the reference product completing its intended use.",
+        },
+        front_load=False,
+    )
+    assert parsed is not None
+    _, prompt = parsed
+    assert prompt["visible_text_lines"] == ["ใช้งานจริง", "พร้อมทุกวัน"]
+    assert prompt["target_language_copy"] == "ใช้งานจริง\nพร้อมทุกวัน"
+    assert prompt["final"].endswith("ใช้งานจริง\nพร้อมทุกวัน")
 
 
 def test_gpt55_system_prompt_is_neutral_designer_node() -> None:
@@ -235,27 +260,26 @@ def test_gpt55_system_prompt_is_neutral_designer_node() -> None:
     assert "必须优先执行" in text
     assert "整套图目标" in text
     assert "购买决策" in text
-    assert "电商营销美感标准" in text
-    assert "电商广告级设计水准" in text
-    assert "每张图至少选择 2-4 个适合该品类的电商设计工具" in text
+    assert "跨品类商业质量标准" in text
+    assert "每张图至少选择 2-4 个适合该品类的电商设计工具" not in text
+    assert "3C、灯具、工具、户外、电池" not in text
+    assert "产品主体占画面 60%-70%" not in text
     assert "visible_text_lines" in text
-    assert "让买家一眼看懂商品是什么、适合谁、为什么值得点进来" in text
-    assert "每张图服务不同购买决策" in text
+    assert "让买家立即看懂商品是什么" in text
+    assert "每张图都必须服务一个不同的购买决策" in text
     assert "电商详情页图片" in text
-    assert "粗体营销字体" in text
-    assert "速度线" in text
-    assert "参数模块" in text
     assert "每张 prompt 的写法" in text
     assert "zh 必须是 final 的中文执行版" in text
     assert "真实使用关系" in text
     assert "英文生图提示词，必须自包含" in text
-    assert "证据信息" in text
+    assert "卖点证据" in text
     assert "可见文字" in text
     assert "给用户预览和编辑" in text
-    assert "无法从商品外观合理推断" in text
-    assert "缺失参数处理" in text
-    assert "步骤图处理" in text
-    assert "Panel 1、Panel 2、Panel 3" in text
+    assert "精确尺寸、容量、功率、认证和性能数字只使用用户或参考图明确提供的信息" in text
+    assert "固定九槽" in text
+    assert "使用步骤图" in text
+    assert "不同动作和不同商品状态" in text
+    assert "Panel 1、Panel 2、Panel 3" not in text
     assert "1–4" not in text
     assert "1-4" not in text
     for phrase in (
@@ -287,6 +311,29 @@ def test_gpt55_system_treats_store_name_as_ad_layer() -> None:
     assert "店铺名称是广告图层素材，不等于商品本体 Logo" in text
     assert "不能印到商品表面" in text
     assert "角标、页眉、贴纸、店铺标签或画面署名" in text
+
+
+def test_retranslate_uses_edited_zh_as_complete_source() -> None:
+    text = retranslate_final_prompt("TH")
+    assert "用户编辑后的 zh 是本张画面的唯一创意来源" in text
+    assert "画面可见文字" in text
+    assert "当地语言字符原样保留" in text
+    assert "固定 5 段" not in text
+    assert "The reference product has exactly N" not in text
+
+
+def test_legacy_display_prompt_includes_saved_visible_text() -> None:
+    prompt_version = SimpleNamespace(
+        structured_output={
+            "display_prompt": "完整中文生图提示词。",
+            "visible_text_lines": ["ข้อความหลัก", "จุดขาย"],
+            "node_output": {"display_prompt": "完整中文生图提示词。"},
+        }
+    )
+
+    metadata = _prompt_slot_metadata(prompt_version)
+
+    assert metadata["displayPrompt"] == "完整中文生图提示词。\n画面可见文字：\nข้อความหลัก\nจุดขาย"
 
 
 def test_gpt55_user_prompt_passes_product_name_without_classifying() -> None:
@@ -356,7 +403,11 @@ def test_gpt55_single_node_uses_one_apimart_call() -> None:
             identity_lock="",
             analysis_snapshot={},
             cluster_assets=[],
-            batch=SimpleNamespace(output_template=SimpleNamespace(slots=slots), global_prompt=""),
+            batch=SimpleNamespace(
+                ai_recognition_enabled=True,
+                output_template=SimpleNamespace(slots=slots),
+                global_prompt="",
+            ),
         )
         style_brief, prompts, node = _gpt55_single_node(None, cluster, "TH")
         _merge_single_node_identity(cluster, node)
@@ -373,7 +424,7 @@ def test_gpt55_single_node_uses_one_apimart_call() -> None:
     assert cluster.identity_lock.startswith("主商品 黄色毛绒玩具")
 
 
-def test_gpt55_single_node_skips_image_input_when_product_name_is_filled() -> None:
+def test_gpt55_single_node_always_sends_image_input_when_product_name_is_filled() -> None:
     class FakeAPIMart:
         def __init__(self) -> None:
             self.calls: list[dict] = []
@@ -394,15 +445,22 @@ def test_gpt55_single_node_skips_image_input_when_product_name_is_filled() -> No
                 }
             }
 
-    class ExplodingStorage:
+    class FakeStorage:
         def local_path(self, storage_path: str):
-            raise AssertionError("image path should not be read when product name is filled")
+            class Context:
+                def __enter__(self):
+                    return "local-product-image.png"
+
+                def __exit__(self, exc_type, exc, tb):
+                    return False
+
+            return Context()
 
     fake_client = FakeAPIMart()
     original_client = prepare_module.APIMartClient
     original_storage = prepare_module.get_storage
     prepare_module.APIMartClient = lambda: fake_client
-    prepare_module.get_storage = lambda: ExplodingStorage()
+    prepare_module.get_storage = lambda: FakeStorage()
     try:
         cluster = SimpleNamespace(
             name="",
@@ -423,7 +481,7 @@ def test_gpt55_single_node_skips_image_input_when_product_name_is_filled() -> No
         prepare_module.APIMartClient = original_client
         prepare_module.get_storage = original_storage
 
-    assert fake_client.calls[0]["kwargs"]["image_sources"] == []
+    assert fake_client.calls[0]["kwargs"]["image_sources"] == ["local-product-image.png"]
 
 
 def test_gpt55_single_node_ignores_import_filename_placeholder_when_ai_recognition_enabled() -> None:
@@ -486,6 +544,32 @@ def test_gpt55_single_node_ignores_import_filename_placeholder_when_ai_recogniti
 
     assert "用户填写商品名称：(未填写，请结合商品参考图识别)" in fake_client.calls[0]["user"]
     assert fake_client.calls[0]["kwargs"]["image_sources"] == ["local-product-image.png"]
+
+
+def test_gpt55_single_node_does_not_write_back_identity_when_ai_recognition_is_disabled() -> None:
+    cluster = SimpleNamespace(
+        product_name="用户填写商品名",
+        product_facts="用户填写材质",
+        identity_lock="",
+        analysis_snapshot={},
+        batch=SimpleNamespace(ai_recognition_enabled=False),
+    )
+    node = {
+        "identity": {
+            "product_name": "模型识别商品名",
+            "category": "模型识别品类",
+            "observed_identity": "模型识别补充信息",
+            "reference_quality": 90,
+        },
+        "identity_lock": "保持参考图中的商品结构、颜色与部件。",
+    }
+
+    _merge_single_node_identity(cluster, node)
+
+    assert cluster.product_name == "用户填写商品名"
+    assert cluster.product_facts == "用户填写材质"
+    assert cluster.identity_lock == "保持参考图中的商品结构、颜色与部件。"
+    assert cluster.analysis_snapshot["identity"]["observed_identity"] == "模型识别补充信息"
 
 
 def test_gpt55_single_node_does_not_block_short_prompts() -> None:

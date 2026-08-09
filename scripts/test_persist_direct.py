@@ -17,7 +17,7 @@ from backend.db import SessionLocal, init_db
 from backend.models import Batch, Cluster, User
 from backend.seed import seed_output_template
 from backend.services.template import global_fallback_template, template_slots
-from backend.services.prompt_compile import persist_prompts_direct
+from backend.services.prompt_compile import edit_prompt_text, persist_prompts_direct
 
 SLOT_NAMES = {1: "Shopee high-CTR main poster", 9: "Quality and trust"}
 
@@ -85,11 +85,29 @@ def main() -> None:
         for order, pv in sorted(by_order.items()):
             assert pv.prompt_text.strip(), f"槽位 {order} prompt 为空"
             assert pv.node_name == "prompt_writer", f"槽位 {order} node_name={pv.node_name}"
-            assert pv.structured_output.get("node_output", {}).get("display_prompt") == prompts[order]["zh"], (
-                f"槽位 {order} display_prompt 应等于中文生图提示词"
-            )
+            display_prompt = pv.structured_output.get("node_output", {}).get("display_prompt") or ""
+            assert display_prompt.startswith(prompts[order]["zh"]), f"槽位 {order} display_prompt 应保留中文生图提示词"
+            assert "画面可见文字：" in display_prompt, f"槽位 {order} 中文生图提示词应包含可见文字段"
+            assert prompts[order]["target_language_copy"] in display_prompt, f"槽位 {order} 中文稿应包含当地语言文案"
             assert pv.structured_output.get("target_language_copy") == prompts[order]["target_language_copy"]
             assert pv.output_slot.name == SLOT_NAMES.get(order, pv.output_slot.name)
+
+        edited = edit_prompt_text(
+            db,
+            cluster,
+            1,
+            by_order[1].prompt_text,
+            display_prompt=(
+                "主图中文生图提示词：突出完整商品和核心卖点。\n"
+                "画面可见文字：\n"
+                "ข้อความใหม่\n"
+                "จุดขายใหม่"
+            ),
+            actor_id=user.id,
+        )
+        edited_structured = edited.structured_output or {}
+        assert edited_structured.get("target_language_copy") == "ข้อความใหม่\nจุดขายใหม่"
+        assert edited_structured.get("visible_text_lines") == ["ข้อความใหม่", "จุดขายใหม่"]
 
         print("PASS：9 条双语 PromptVersion")
         print(f"  模板槽数：{len(slots)}")

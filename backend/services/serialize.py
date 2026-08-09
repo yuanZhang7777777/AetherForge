@@ -192,6 +192,8 @@ def _serialize_output_summary(generation: Generation) -> dict:
 def _prompt_slot_metadata(latest_prompt) -> dict:
     if latest_prompt is None:
         return {}
+    from .prompt_compile import _with_zh_visible_copy
+
     structured = latest_prompt.structured_output or {}
     node_output = structured.get("node_output") if isinstance(structured, dict) else {}
     if not isinstance(node_output, dict):
@@ -199,7 +201,10 @@ def _prompt_slot_metadata(latest_prompt) -> dict:
     meta: dict = {}
     display = node_output.get("display_prompt") or structured.get("display_prompt")
     if display:
-        meta["displayPrompt"] = str(display)
+        visible_text_lines = node_output.get("visible_text_lines") or structured.get("visible_text_lines") or []
+        if not isinstance(visible_text_lines, list):
+            visible_text_lines = []
+        meta["displayPrompt"] = _with_zh_visible_copy(display, visible_text_lines)
     marketing_plan = structured.get("marketing_plan")
     if isinstance(marketing_plan, dict):
         for key in ("imageGoal", "buyerQuestion", "creativeAngle", "decisionTask", "conversionGoal"):

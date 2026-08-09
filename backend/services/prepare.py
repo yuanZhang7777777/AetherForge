@@ -32,7 +32,7 @@ from ..prompts import (
 from ..providers import APIMartClient, DeepSeekClient, extract_json
 from ..storage import get_storage
 from .contract import preparation_fingerprint
-from .prompt_compile import _facts, _normalize_prompt_text, _person_policy, _site, persist_prompts_direct
+from .prompt_compile import _facts, _normalize_prompt_text, _person_policy, _site, _split_zh_visible_copy, _with_zh_visible_copy, persist_prompts_direct
 from .template import global_fallback_template, template_slots
 
 STAGES = ["N1", "N2", "N3"]
@@ -459,16 +459,14 @@ def _gpt55_single_node(db: Session, cluster: Cluster, site: str) -> tuple[str, d
     last_error = ""
     with ExitStack() as stack:
         image_sources: list[str] = []
-        should_send_images = bool(getattr(cluster.batch, "ai_recognition_enabled", False) and not product_name)
-        if should_send_images:
-            for item in cluster.cluster_assets:
-                if item.asset.kind != "image":
-                    continue
-                try:
-                    local = stack.enter_context(get_storage().local_path(item.asset.storage_path))
-                    image_sources.append(str(local))
-                except Exception:
-                    continue
+        for item in cluster.cluster_assets:
+            if item.asset.kind != "image":
+                continue
+            try:
+                local = stack.enter_context(get_storage().local_path(item.asset.storage_path))
+                image_sources.append(str(local))
+            except Exception:
+                continue
         for attempt in range(2):
             user_text = base_user if attempt == 0 else _single_node_repair_user(base_user, [last_error])
             result = client.complete_json(
@@ -537,7 +535,8 @@ def _merge_single_node_identity(cluster: Cluster, node: dict) -> None:
     recognized_name = _clean_product_name(identity.get("product_name"))
     recognized_identity = str(identity.get("observed_identity") or "").strip()
     current_name = _user_product_name(cluster)
-    if not current_name and recognized_name:
+    write_back = bool(getattr(cluster.batch, "ai_recognition_enabled", False))
+    if write_back and not current_name and recognized_name:
         cluster.product_name = recognized_name
         analysis["product_name"] = recognized_name
         analysis["product_name_source"] = "ai"
@@ -545,7 +544,7 @@ def _merge_single_node_identity(cluster: Cluster, node: dict) -> None:
         identity["product_name"] = current_name
         analysis["product_name_source"] = "manual"
 
-    if not (cluster.product_facts or "").strip() and recognized_identity:
+    if write_back and not (cluster.product_facts or "").strip() and recognized_identity:
         cluster.product_facts = recognized_identity[:2000]
         analysis["product_facts_source"] = "recognition"
     elif (cluster.product_facts or "").strip() and recognized_identity:
@@ -575,7 +574,7 @@ def _prompt_item(item, expected_slot: int | None = None, *, front_load: bool = T
     target_copy = "\n".join(visible_lines)
     prompt = {
         "final": _front_load_shopee_prompt(final, target_copy, visible_lines) if front_load else _ensure_visible_copy(final, target_copy, visible_lines),
-        "zh": _normalize_prompt_text(item.get("zh")),
+        "zh": _with_zh_visible_copy(item.get("zh"), visible_lines),
         "target_language_copy": target_copy,
         "visible_text_lines": visible_lines,
     }
@@ -593,6 +592,9 @@ def _visible_text_lines_from_item(item: dict) -> tuple[list[str], list[str]]:
     raw_lines = _raw_visible_text_lines(item.get("visible_text_lines"))
     if not raw_lines:
         raw_lines = _raw_visible_text_lines(item.get("target_language_copy"))
+    if not raw_lines:
+        _body, zh_lines = _split_zh_visible_copy(item.get("zh"))
+        raw_lines = zh_lines or []
     lines: list[str] = []
     issues: list[str] = []
     for raw in raw_lines:

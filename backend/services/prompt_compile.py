@@ -10,11 +10,31 @@ from .serialize import _effective_config
 from .template import global_fallback_template, template_slots
 
 _IMAGE_FILENAME_RE = re.compile(r"^[^\\/]+\.(?:jpe?g|png|webp|gif|bmp|tiff?)$", re.IGNORECASE)
+_ZH_VISIBLE_TEXT_RE = re.compile(r"(?m)^\s*画面可见文字\s*[:：]\s*$")
 
 
 def _normalize_prompt_text(value) -> str:
     """模型有时会把换行输出成字面量 \\n 或 /n，入库前统一成真实换行。"""
     return str(value or "").replace("\\n", "\n").replace("/n", "\n").strip()
+
+
+def _split_zh_visible_copy(value) -> tuple[str, list[str] | None]:
+    text = _normalize_prompt_text(value)
+    match = _ZH_VISIBLE_TEXT_RE.search(text)
+    if match is None:
+        return text, None
+    body = text[: match.start()].strip()
+    lines = [line.strip() for line in text[match.end() :].splitlines() if line.strip()]
+    return body, lines
+
+
+def _with_zh_visible_copy(value, visible_text_lines: list[str]) -> str:
+    body, _ = _split_zh_visible_copy(value)
+    lines = [_normalize_prompt_text(line) for line in visible_text_lines]
+    lines = [line for line in lines if line]
+    if not lines:
+        return body
+    return body + "\n画面可见文字：\n" + "\n".join(lines)
 
 
 def _facts(cluster: Cluster) -> list[str]:
@@ -163,6 +183,12 @@ def persist_prompts_direct(
         zh = _normalize_prompt_text(item.get("zh"))
         target_language_copy = _normalize_prompt_text(item.get("target_language_copy"))
         visible_text_lines = item.get("visible_text_lines") or []
+        if not isinstance(visible_text_lines, list):
+            visible_text_lines = []
+        if not visible_text_lines:
+            visible_text_lines = [line.strip() for line in target_language_copy.splitlines() if line.strip()]
+        target_language_copy = "\n".join(visible_text_lines)
+        zh = _with_zh_visible_copy(zh, visible_text_lines)
         structured = _structured_output(
             {"target_language_copy": target_language_copy, "visible_text_lines": visible_text_lines},
             display_prompt=zh,
@@ -219,6 +245,14 @@ def edit_prompt_text(
     if has_display:
         final_text = latest.prompt_text if latest is not None else prompt_text.strip()
         new_zh = display_prompt if display_prompt is not None else prompt_text
+        _body, edited_visible_lines = _split_zh_visible_copy(new_zh)
+        if edited_visible_lines is None:
+            edited_visible_lines = structured.get("visible_text_lines") or []
+        if not isinstance(edited_visible_lines, list):
+            edited_visible_lines = []
+        edited_visible_lines = [_normalize_prompt_text(line) for line in edited_visible_lines]
+        edited_visible_lines = [line for line in edited_visible_lines if line]
+        new_zh = _with_zh_visible_copy(new_zh, edited_visible_lines)
         return persist_prompt_version(
             db,
             cluster,
@@ -226,8 +260,8 @@ def edit_prompt_text(
             final_text,
             _structured_output(
                 {
-                    "target_language_copy": structured.get("target_language_copy") or {},
-                    "visible_text_lines": structured.get("visible_text_lines") or [],
+                    "target_language_copy": "\n".join(edited_visible_lines),
+                    "visible_text_lines": edited_visible_lines,
                 },
                 display_prompt=_normalize_prompt_text(new_zh),
                 zh_edited=True,
