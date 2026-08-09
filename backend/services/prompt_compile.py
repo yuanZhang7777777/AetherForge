@@ -75,9 +75,13 @@ def _structured_output(
     display_prompt: str = "",
     zh_edited: bool = False,
 ) -> dict:
+    visible_text_lines = node.get("visible_text_lines") or []
+    if not isinstance(visible_text_lines, list):
+        visible_text_lines = []
     node_output = {
         "display_prompt": display_prompt,
         "localized_copy": node.get("target_language_copy") or {},
+        "visible_text_lines": visible_text_lines,
     }
     marketing_plan = node.get("marketing_plan") or {}
     if not isinstance(marketing_plan, dict):
@@ -86,6 +90,7 @@ def _structured_output(
         "node_output": node_output,
         "marketing_plan": marketing_plan,
         "target_language_copy": node.get("target_language_copy") or {},
+        "visible_text_lines": visible_text_lines,
         "display_prompt": display_prompt,
         "zh_edited": zh_edited,
         "lang": "en",
@@ -142,7 +147,8 @@ def persist_prompts_direct(
 ) -> list[PromptVersion]:
     """把写提示词节点产出的双语提示词落 PromptVersion（lang=en）。
 
-    prompts 为 {slot_order: {"final": 英文出图提示词, "zh": final 的中文版中文生图提示词, "target_language_copy": 当地语文案}}；
+    prompts 为 {slot_order: {"final": 英文出图提示词, "zh": final 的中文版中文生图提示词,
+    "target_language_copy": 当地语文案, "visible_text_lines": 短可见文案数组}}；
     prompt_text 存 final（worker 未编辑时原样提交），display_prompt 存 zh（可编辑）。
     缺失槽位直接报错，避免静默产出劣质图。
     """
@@ -156,8 +162,9 @@ def persist_prompts_direct(
             raise ValueError(f"写提示词缺失槽位 {slot.order}（{slot.name}），请重新预备生成")
         zh = _normalize_prompt_text(item.get("zh"))
         target_language_copy = _normalize_prompt_text(item.get("target_language_copy"))
+        visible_text_lines = item.get("visible_text_lines") or []
         structured = _structured_output(
-            {"target_language_copy": target_language_copy},
+            {"target_language_copy": target_language_copy, "visible_text_lines": visible_text_lines},
             display_prompt=zh,
             zh_edited=False,
         )
@@ -218,7 +225,10 @@ def edit_prompt_text(
             slot,
             final_text,
             _structured_output(
-                {"target_language_copy": structured.get("target_language_copy") or {}},
+                {
+                    "target_language_copy": structured.get("target_language_copy") or {},
+                    "visible_text_lines": structured.get("visible_text_lines") or [],
+                },
                 display_prompt=_normalize_prompt_text(new_zh),
                 zh_edited=True,
             ),

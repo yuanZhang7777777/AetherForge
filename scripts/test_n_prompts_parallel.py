@@ -61,11 +61,14 @@ def main() -> None:
     test_prompt_item_front_loads_shopee_ad_style_and_visible_copy()
     test_prompt_item_can_skip_legacy_front_load()
     test_prompt_item_normalizes_literal_newlines()
+    test_prompt_item_prefers_short_visible_text_lines_and_strips_long_block()
     test_gpt55_system_prompt_is_neutral_designer_node()
+    test_gpt55_system_treats_store_name_as_ad_layer()
     test_gpt55_single_node_uses_one_apimart_call()
     test_gpt55_single_node_skips_image_input_when_product_name_is_filled()
     test_gpt55_single_node_ignores_import_filename_placeholder_when_ai_recognition_enabled()
     test_single_node_quality_retries_bad_dimension_and_steps()
+    test_single_node_quality_checks_visual_prompt_not_visible_text_length()
     test_single_node_quality_does_not_block_on_short_zh_after_retry()
     test_single_node_quality_accepts_visual_dimension_without_numbers()
     print("PASS: split-slot N2 prompt writer")
@@ -199,6 +202,34 @@ def test_prompt_item_normalizes_literal_newlines() -> None:
     assert prompt["target_language_copy"] == "标题\n卖点"
 
 
+def test_prompt_item_prefers_short_visible_text_lines_and_strips_long_block() -> None:
+    parsed = _prompt_item(
+        {
+            "slot": 9,
+            "zh": rich_zh("品质信任图"),
+            "visible_text_lines": ["พร้อมส่งมั่นใจ", "วัสดุเรียบร้อย", "แพ็กอย่างดี"],
+            "target_language_copy": (
+                "คุณภาพและความน่าเชื่อถือ: แสดงตราคุณภาพ ตรวจสอบคุณภาพ "
+                "บรรจุภัณฑ์ที่มั่นคง เนื้อวัสดุและโครงสร้างที่แข็งแรง"
+            ),
+            "final": (
+                "Quality and trust ecommerce image for the same reference product. "
+                "Use packaging-table composition, close-up material insets, callout lines, clean commercial lighting, "
+                "and a small corner store badge only as an overlay. "
+                "VISIBLE TEXT: Render exactly these lines, each line once, with readable typography:\n"
+                "คุณภาพและความน่าเชื่อถือ: แสดงตราคุณภาพ ตรวจสอบคุณภาพ บรรจุภัณฑ์ที่มั่นคง"
+            ),
+        },
+        front_load=False,
+    )
+    assert parsed is not None
+    _, prompt = parsed
+    assert "คุณภาพและความน่าเชื่อถือ" not in prompt["final"]
+    assert "Render exactly" not in prompt["final"]
+    assert prompt["final"].endswith("พร้อมส่งมั่นใจ\nวัสดุเรียบร้อย\nแพ็กอย่างดี")
+    assert prompt["target_language_copy"] == "พร้อมส่งมั่นใจ\nวัสดุเรียบร้อย\nแพ็กอย่างดี"
+
+
 def test_gpt55_system_prompt_is_neutral_designer_node() -> None:
     text = n_prepare_single_gpt55_system("TH")
     assert "图片设计师" in text
@@ -209,6 +240,9 @@ def test_gpt55_system_prompt_is_neutral_designer_node() -> None:
     assert "整套图目标" in text
     assert "购买决策" in text
     assert "电商营销美感标准" in text
+    assert "电商广告级设计水准" in text
+    assert "每张图至少选择 2-4 个适合该品类的电商设计工具" in text
+    assert "visible_text_lines" in text
     assert "让买家一眼看懂商品是什么、适合谁、为什么值得点进来" in text
     assert "每张图服务不同购买决策" in text
     assert "电商详情页图片" in text
@@ -252,6 +286,13 @@ def test_gpt55_system_prompt_is_neutral_designer_node() -> None:
         assert phrase not in text
 
 
+def test_gpt55_system_treats_store_name_as_ad_layer() -> None:
+    text = n_prepare_single_gpt55_system("TH")
+    assert "店铺名称是广告图层素材，不等于商品本体 Logo" in text
+    assert "不能印到商品表面" in text
+    assert "角标、页眉、贴纸、店铺标签或画面署名" in text
+
+
 def test_gpt55_user_prompt_passes_product_name_without_classifying() -> None:
     text = n_prepare_single_gpt55_user(
         "直接梯形马卡5号-黑色 菱格鲜花包装袋",
@@ -263,6 +304,7 @@ def test_gpt55_user_prompt_passes_product_name_without_classifying() -> None:
     )
     assert "用户填写商品名称：直接梯形马卡5号-黑色 菱格鲜花包装袋" in text
     assert "用户填写店铺名称：Example Store" in text
+    assert "默认作为广告图层或店铺标识设计，不要印到商品表面" in text
     assert "直接梯形马卡5号-黑色 菱格鲜花包装袋" in text
     assert "可能混含" not in text
     assert "都必须作为事实解析" not in text
@@ -552,6 +594,33 @@ def test_single_node_quality_retries_bad_dimension_and_steps() -> None:
     assert "final 过短" in fake_client.calls[1]["user"]
     assert "缺失参数" in fake_client.calls[1]["user"]
     assert "Panel 1" in prompts[7]["final"]
+
+
+def test_single_node_quality_checks_visual_prompt_not_visible_text_length() -> None:
+    long_copy = (
+        "คุณภาพและความน่าเชื่อถือ: แสดงตราคุณภาพ ตรวจสอบคุณภาพ บรรจุภัณฑ์ที่มั่นคง "
+        "เนื้อวัสดุและโครงสร้างที่แข็งแรง เน้นรายละเอียดด้วยภาพใกล้ชิด พร้อมโลโก้ xuecheng "
+        "เพื่อสร้างความน่าเชื่อถือ"
+    )
+    parsed = _prompt_item(
+        {
+            "slot": 9,
+            "zh": rich_zh("品质信任图"),
+            "final": "Quality & trust: show QC stamp, secure packaging components, material texture, and stable structure. "
+            "VISIBLE TEXT: Render exactly these lines:\n" + long_copy,
+            "target_language_copy": long_copy,
+        },
+        front_load=False,
+    )
+    assert parsed is not None
+    _, prompt = parsed
+    issues = _single_node_prompt_quality_issues(
+        {9: prompt},
+        [{"order": 9, "name": "Quality and trust"}],
+        include_preview_issues=True,
+    )
+    assert any("final 过短" in issue for issue in issues)
+    assert any("可见文字不是短文案" in issue for issue in issues)
 
 
 def test_single_node_quality_accepts_visual_dimension_without_numbers() -> None:

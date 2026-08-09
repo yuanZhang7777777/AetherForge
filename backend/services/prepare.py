@@ -47,10 +47,20 @@ _SHOPEE_AD_PREFIX = (
 )
 _MIN_SINGLE_NODE_FINAL_CHARS = 320
 _MIN_SINGLE_NODE_ZH_CHARS = 90
+_VISIBLE_TEXT_MAX_LINES = 5
+_VISIBLE_TEXT_MAX_CHARS = 72
 _SIZE_MISSING_DISCLAIMER_RE = re.compile(
     r"(未提供|无参数|沒有參數|没有参数|请查看|請查看|查看商品页|查看商品頁|"
     r"no parameters|not provided|missing parameters|check product page|view product page|"
     r"โปรดดู|ดูรายละเอียดสินค้า|ไม่มีพารามิเตอร์)",
+    re.IGNORECASE,
+)
+_VISIBLE_TEXT_MARKER_RE = re.compile(r"\b(?:VISIBLE\s+TEXT|TEXT\s+RENDERING)\s*:", re.IGNORECASE)
+_VISIBLE_TEXT_PLANNING_RE = re.compile(
+    r"(render exactly|visible text|target_language_copy|"
+    r"quality\s*&\s*trust|quality and trust|pain point|usage steps|size and material|"
+    r"detail close-up|main poster|key benefit|lifestyle image|"
+    r"主图|核心卖点图|细节特写图|真实使用场景图|痛点解决图|尺寸材质图|使用步骤图|生活方式图|品质信任图)",
     re.IGNORECASE,
 )
 
@@ -525,15 +535,18 @@ def _single_node_prompt_quality_issues(
         zh = str(prompt.get("zh") or "").strip()
         final = str(prompt.get("final") or "").strip()
         target_copy = str(prompt.get("target_language_copy") or "").strip()
+        visual_final = _strip_visible_text_section(final)
         label = f"槽位 {slot} {name}".strip()
 
-        if len(final) < _MIN_SINGLE_NODE_FINAL_CHARS:
+        if len(visual_final) < _MIN_SINGLE_NODE_FINAL_CHARS:
             issues.append(f"{label} final 过短，需要补充构图、商品状态、图形设计和画面细节")
         if include_preview_issues and len(zh) < _MIN_SINGLE_NODE_ZH_CHARS:
             issues.append(f"{label} zh 过短，需要给用户可编辑的完整中文生图提示词")
+        if include_preview_issues and prompt.get("_visible_text_issues"):
+            issues.append(f"{label} 可见文字不是短文案，需要改成 2-5 行短标题/短卖点/短标注")
 
-        lower_final = final.lower()
-        combined = f"{zh}\n{final}\n{target_copy}"
+        lower_final = visual_final.lower()
+        combined = f"{zh}\n{visual_final}\n{target_copy}"
         if slot == 6 or "尺寸" in name or "material" in name.lower():
             if _SIZE_MISSING_DISCLAIMER_RE.search(combined):
                 issues.append(f"{label} 把缺失参数写成画面文案，需要改成视觉化尺寸/材质说明")
@@ -611,33 +624,78 @@ def _prompt_item(item, expected_slot: int | None = None, *, front_load: bool = T
     final = _normalize_prompt_text(item.get("final") or item.get("prompt"))
     if slot < 1 or not final:
         return None
-    target_copy = _normalize_prompt_text(item.get("target_language_copy"))
-    return slot, {
-        "final": _front_load_shopee_prompt(final, target_copy) if front_load else _ensure_visible_copy(final, target_copy),
+    visible_lines, visible_issues = _visible_text_lines_from_item(item)
+    target_copy = "\n".join(visible_lines)
+    prompt = {
+        "final": _front_load_shopee_prompt(final, target_copy, visible_lines) if front_load else _ensure_visible_copy(final, target_copy, visible_lines),
         "zh": _normalize_prompt_text(item.get("zh")),
         "target_language_copy": target_copy,
+        "visible_text_lines": visible_lines,
     }
+    if visible_issues:
+        prompt["_visible_text_issues"] = visible_issues
+    return slot, prompt
 
 
-def _ensure_visible_copy(final: str, target_copy: str) -> str:
-    text = final.strip()
-    if target_copy:
-        text = text.replace(
-            "Embed the Thai copy exactly as provided in the target_language_copy field.",
-            f"Render exactly these visible text lines, each line once: {target_copy}.",
-        )
-        text = text.replace("target_language_copy field", "visible text block")
-        text = text.replace("target_language_copy", "visible text block")
-        if target_copy not in text:
-            text += (
-                "\nVISIBLE TEXT: Render exactly these lines, each line once, with readable typography:\n"
-                + target_copy
-            )
+def _strip_visible_text_section(text: str) -> str:
+    match = _VISIBLE_TEXT_MARKER_RE.search(text)
+    return (text[: match.start()] if match else text).strip()
+
+
+def _visible_text_lines_from_item(item: dict) -> tuple[list[str], list[str]]:
+    raw_lines = _raw_visible_text_lines(item.get("visible_text_lines"))
+    if not raw_lines:
+        raw_lines = _raw_visible_text_lines(item.get("target_language_copy"))
+    lines: list[str] = []
+    issues: list[str] = []
+    for raw in raw_lines:
+        line = re.sub(r"\s+", " ", raw).strip(" -•*；;，,。")
+        if not line:
+            continue
+        if len(line) > _VISIBLE_TEXT_MAX_CHARS:
+            issues.append("too_long")
+            continue
+        if ":" in line and len(line) > 45:
+            issues.append("looks_like_brief")
+            continue
+        if _VISIBLE_TEXT_PLANNING_RE.search(line):
+            issues.append("planning_label")
+            continue
+        if line not in lines:
+            lines.append(line)
+    if len(lines) > _VISIBLE_TEXT_MAX_LINES:
+        issues.append("too_many_lines")
+        lines = lines[:_VISIBLE_TEXT_MAX_LINES]
+    if raw_lines and not lines:
+        issues.append("no_valid_short_copy")
+    return lines, issues
+
+
+def _raw_visible_text_lines(value) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        lines: list[str] = []
+        for item in value:
+            lines.extend(_raw_visible_text_lines(item))
+        return lines
+    if isinstance(value, dict):
+        return []
+    text = _normalize_prompt_text(value)
+    return [line.strip() for line in text.splitlines() if line.strip()]
+
+
+def _ensure_visible_copy(final: str, target_copy: str, visible_lines: list[str] | None = None) -> str:
+    text = _strip_visible_text_section(final)
+    lines = visible_lines if visible_lines is not None else [line for line in target_copy.splitlines() if line.strip()]
+    if lines:
+        block = "\n".join(lines)
+        text += "\nVISIBLE TEXT:\n" + block
     return text
 
 
-def _front_load_shopee_prompt(final: str, target_copy: str) -> str:
-    text = _ensure_visible_copy(final, target_copy)
+def _front_load_shopee_prompt(final: str, target_copy: str, visible_lines: list[str] | None = None) -> str:
+    text = _ensure_visible_copy(final, target_copy, visible_lines)
     if not text.startswith(_SHOPEE_AD_PREFIX):
         text = _SHOPEE_AD_PREFIX + "\n" + text
     return text
