@@ -45,6 +45,14 @@ _SHOPEE_AD_PREFIX = (
     "speed lines, strong red/yellow/black or orange/blue contrast, product occupies 60-70% of the frame, "
     "designed for mobile shoppers."
 )
+_MIN_SINGLE_NODE_FINAL_CHARS = 320
+_MIN_SINGLE_NODE_ZH_CHARS = 90
+_SIZE_MISSING_DISCLAIMER_RE = re.compile(
+    r"(未提供|无参数|沒有參數|没有参数|请查看|請查看|查看商品页|查看商品頁|"
+    r"no parameters|not provided|missing parameters|check product page|view product page|"
+    r"โปรดดู|ดูรายละเอียดสินค้า|ไม่มีพารามิเตอร์)",
+    re.IGNORECASE,
+)
 
 
 class PreparationFailed(RuntimeError):
@@ -437,6 +445,16 @@ def _gpt55_single_node(db: Session, cluster: Cluster, site: str) -> tuple[str, d
     facts = _facts(cluster)
     person_policy = _person_policy(cluster)
     client = APIMartClient()
+    system_text = n_prepare_single_gpt55_system(site)
+    base_user = n_prepare_single_gpt55_user(
+        product_name,
+        facts,
+        site,
+        person_policy,
+        slots,
+        store_name=str(getattr(cluster, "store_name", "") or "").strip(),
+    )
+    last_issues: list[str] = []
     with ExitStack() as stack:
         image_sources: list[str] = []
         should_send_images = bool(getattr(cluster.batch, "ai_recognition_enabled", False) and not product_name)
@@ -449,20 +467,28 @@ def _gpt55_single_node(db: Session, cluster: Cluster, site: str) -> tuple[str, d
                     image_sources.append(str(local))
                 except Exception:
                     continue
-        result = client.complete_json(
-            n_prepare_single_gpt55_system(site),
-            n_prepare_single_gpt55_user(
-                product_name,
-                facts,
-                site,
-                person_policy,
-                slots,
-                store_name=str(getattr(cluster, "store_name", "") or "").strip(),
-            ),
-            image_sources=image_sources,
-            max_tokens=settings.apimart_prompt_max_output_tokens,
-        )
-    node = result["json"]
+        for attempt in range(2):
+            user_text = base_user if attempt == 0 else _single_node_repair_user(base_user, last_issues)
+            result = client.complete_json(
+                system_text,
+                user_text,
+                image_sources=image_sources,
+                max_tokens=settings.apimart_prompt_max_output_tokens,
+            )
+            try:
+                style_brief, prompts, node = _parse_single_node_result(result.get("json"), slots)
+            except PreparationFailed as exc:
+                last_issues = [str(exc)]
+                if attempt == 0:
+                    continue
+                raise
+            last_issues = _single_node_prompt_quality_issues(prompts, slots)
+            if not last_issues:
+                return style_brief, prompts, node
+    raise PreparationFailed("APIMart 单节点提示词质量不合格：" + "；".join(last_issues))
+
+
+def _parse_single_node_result(node, slots: list[dict]) -> tuple[str, dict[int, dict], dict]:
     if not isinstance(node, dict):
         raise PreparationFailed("APIMart 单节点未返回 JSON 对象")
     style_brief = str(node.get("style_brief") or "").strip()
@@ -480,6 +506,47 @@ def _gpt55_single_node(db: Session, cluster: Cluster, site: str) -> tuple[str, d
     if missing:
         raise PreparationFailed(f"APIMart 单节点缺少槽位：{', '.join(map(str, missing))}")
     return style_brief, prompts, node
+
+
+def _single_node_prompt_quality_issues(prompts: dict[int, dict], slots: list[dict]) -> list[str]:
+    slot_names = {int(s.get("order") or 0): str(s.get("name") or "") for s in slots}
+    issues: list[str] = []
+    for slot, prompt in sorted(prompts.items()):
+        name = slot_names.get(slot, "")
+        zh = str(prompt.get("zh") or "").strip()
+        final = str(prompt.get("final") or "").strip()
+        target_copy = str(prompt.get("target_language_copy") or "").strip()
+        label = f"槽位 {slot} {name}".strip()
+
+        if len(final) < _MIN_SINGLE_NODE_FINAL_CHARS:
+            issues.append(f"{label} final 过短，需要补充构图、商品状态、图形设计和画面细节")
+        if len(zh) < _MIN_SINGLE_NODE_ZH_CHARS:
+            issues.append(f"{label} zh 过短，需要给用户可编辑的完整中文生图提示词")
+
+        lower_final = final.lower()
+        combined = f"{zh}\n{final}\n{target_copy}"
+        if slot == 6 or "尺寸" in name or "material" in name.lower():
+            if _SIZE_MISSING_DISCLAIMER_RE.search(combined):
+                issues.append(f"{label} 把缺失参数写成画面文案，需要改成视觉化尺寸/材质说明")
+            if not any(k in lower_final for k in ("arrow", "measurement", "dimension", "length", "width", "height", "depth", "scale", "ruler")):
+                issues.append(f"{label} 缺少测量箭头、比例参照或尺寸结构表达")
+            if not any(k in lower_final for k in ("material", "texture", "close-up", "close up", "magnified", "callout", "inset", "detail")):
+                issues.append(f"{label} 缺少材质/局部放大/引线说明")
+
+        if slot == 7 or "步骤" in name or "usage" in name.lower():
+            if not all(f"panel {i}" in lower_final for i in (1, 2, 3)):
+                issues.append(f"{label} 必须用 Panel 1、Panel 2、Panel 3 写清不同分镜状态")
+    return issues
+
+
+def _single_node_repair_user(base_user: str, issues: list[str]) -> str:
+    issue_text = "\n".join(f"- {issue}" for issue in issues if issue.strip())
+    return (
+        base_user
+        + "\n\n上一次输出不合格，请根据以下问题重新输出完整 JSON，保持同一个商品和同一套 style_brief，可以重写 prompts：\n"
+        + issue_text
+        + "\n\n要求：不要解释原因；不要只修一个字段；prompts 数组仍必须覆盖全部槽位。"
+    )
 
 
 def _merge_single_node_identity(cluster: Cluster, node: dict) -> None:
